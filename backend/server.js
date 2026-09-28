@@ -1,31 +1,41 @@
-// backend/server.js
 const express = require('express');
+const mongoose = require('mongoose');
+const dotenv = require('dotenv');
 const cors = require('cors');
-require('dotenv').config();
+const dns = require('dns');
 
-const demoRoutes = require('./routes/demo');
-const webhookRoutes = require('./routes/webhook');
+// Force Google DNS to bypass Nigerian ISP (MTN/Airtel) SRV DNS blocks
+dns.setServers(['8.8.8.8', '8.8.4.4']);
+
+dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Routes
-app.use('/demo', demoRoutes);
-app.use('/webhook', webhookRoutes);
+// Import Routes
+const bookingRoutes = require('./src/routes/bookingRoutes');
+const taskRoutes = require('./src/routes/taskRoutes');
 
-// Health Check
+// Mount Routes
+app.use('/api/bookings', bookingRoutes);
+app.use('/api/tasks', taskRoutes);
+
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Automated Guest Operations Engine Running' });
+  res.status(200).json({ status: 'OK', message: 'Hotel Ops Backend is running' });
 });
 
-app.listen(PORT, () => {
-  console.log(`\n==================================================`);
-  console.log(`  HOTEL GUEST OPS ENGINE (BACKEND RUNNING)`);
-  console.log(`  Port: ${PORT}`);
-  console.log(`  Mode: ${process.env.WHATSAPP_TOKEN ? 'LIVE META API' : 'CONSOLE MOCK MODE'}`);
-  console.log(`==================================================\n`);
-});
+const PORT = process.env.PORT || 5000;
+const MONGO_URI = process.env.MONGO_URI;
+
+mongoose
+  .connect(MONGO_URI)
+  .then(() => {
+    console.log('✅ Connected to MongoDB Atlas');
+    app.listen(PORT, () => {
+      console.log(`🚀 Server listening on http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('❌ MongoDB Connection Error:', err.message);
+  });

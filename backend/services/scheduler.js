@@ -1,43 +1,39 @@
 const cron = require('node-cron');
-const { sendWhatsAppMessage } = require('./whatsapp');
+const { sendWhatsAppTemplate } = require('./whatsapp');
+const Room = require('../models/Room');
 
-const scheduledJobs = new Map();
+// Runs every 15 minutes to check for upcoming check-outs
+const initCheckoutScheduler = () => {
+  cron.schedule('*/15 * * * *', async () => {
+    const now = new Date();
+    const targetNoticeWindow = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour ahead
 
-function scheduleQualityCheck(roomNumber, phoneNumber, delayMinutes = 15) {
-  const jobId = `qc_${roomNumber}_${Date.now()}`;
-  const targetTime = new Date(Date.now() + delayMinutes * 60 * 1000);
-  const cronExpression = `${targetTime.getMinutes()} ${targetTime.getHours()} * * *`;
+    try {
+      // Find guests checking out in ~1 hour who haven't received notice yet
+      const roomsToNotify = await Room.find({
+        status: { $in: ['QC_PASSED', 'ARRIVED'] },
+        checkoutNoticeSent: false,
+        checkoutTime: { $lte: targetNoticeWindow,$gt: now }
+      });
 
-  console.log(`\n[ SCHEDULER ] Scheduled Quality Check for Room ${roomNumber} in ${delayMinutes} minutes.`);
+      for (const room of roomsToNotify) {
+        await sendWhatsAppTemplate(room.guestPhone, 'checkout_reminder_template', [
+          { type: 'text', text: room.roomNumber },
+          { type: 'text', text: '12:00 PM' }
+        ]);
 
-  const task = cron.schedule(cronExpression, async () => {
-    console.log(`\n[ SCHEDULER TRIGGERED ] Executing Quality Check for Room ${roomNumber}...`);
-    
-    const payload = {
-      messaging_product: 'whatsapp',
-      to: phoneNumber,
-      type: 'interactive',
-      interactive: {
-        type: 'button',
-        body: {
-          text: `Hi there! You checked into Room ${roomNumber} recently. Is everything up to your expectations?`
-        },
-        action: {
-          buttons: [
-            { type: 'reply', reply: { id: 'qc_perfect', title: 'Everything Great 👌' } },
-            { type: 'reply', reply: { id: 'qc_issue', title: 'Need Assistance 🛠️' } }
-          ]
-        }
+        room.status = 'PRE_CHECKOUT_NOTICE';
+        room.checkoutNoticeSent = true;
+        await room.save();
+
+        console.log(`[Checkout Notice] Dispatched to Room ${room.roomNumber}`);
       }
-    };
-
-    await sendWhatsAppMessage(payload);
-    task.stop();
-    scheduledJobs.delete(jobId);
+    } catch (error) {
+      console.error('Checkout Scheduler Error:', error);
+    }
   });
+};
 
-  scheduledJobs.set(jobId, task);
-  return jobId;
-}
-
-module.exports = { scheduleQualityCheck };
+module.exports = {
+  initCheckoutScheduler
+};
