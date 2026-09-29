@@ -14,10 +14,32 @@ const bot = new Bot(token);
 // Initialize Gemini Client (uses GEMINI_API_KEY from .env)
 const ai = new GoogleGenAI();
 
+const USE_MOCK_AI = process.env.USE_MOCK_AI === 'true';
+
 /**
  * Helper function for smart, low-latency retries on transient 503 errors
  */
 async function callGeminiWithRetry(contents, retries = 2, delay = 400) {
+  // --- MOCK SWITCH ---
+  if (USE_MOCK_AI) {
+    console.log('⚡ [MOCK AI] Bypassing Gemini API call to save quota.');
+    
+    // Simulate the guest message from the contents payload
+    const guestMessage = typeof contents === 'string' ? contents : JSON.stringify(contents);
+    
+    // Return a fake Gemini response object with a text() method that returns our JSON
+    return {
+      text: () => JSON.stringify({
+        isOperationalRequest: true,
+        category: 'Housekeeping',
+        summary: guestMessage, 
+        urgency: 'Medium',
+        replyToGuest: 'Got it! I have logged your request with our team.'
+      })
+    };
+  }
+  // -------------------
+
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       return await ai.models.generateContent({
