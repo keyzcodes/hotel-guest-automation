@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const { Bot } = require('grammy');
 
 const token = process.env.TELEGRAM_BOT_TOKEN;

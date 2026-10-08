@@ -56,4 +56,10 @@ const bookingSchema = new mongoose.Schema(
   }
 );
 
+// Notify only after MongoDB has acknowledged a successful write.
+for (const operation of ['save', 'updateOne', 'findOneAndUpdate', 'updateMany']) {
+  bookingSchema.post(operation, function () {
+    require('../services/realtimeService').publishChange('Booking');
+  });
+}
 module.exports = mongoose.model('Booking', bookingSchema);

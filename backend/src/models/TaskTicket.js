@@ -1,7 +1,13 @@
-﻿const mongoose = require('mongoose');
+const mongoose = require('mongoose');
 
 const taskTicketSchema = new mongoose.Schema(
   {
+    bookingId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Booking',
+      default: null,
+      index: true,
+    },
     guestName: {
       type: String,
       required: true,
@@ -50,4 +56,10 @@ const taskTicketSchema = new mongoose.Schema(
 
 taskTicketSchema.index({ status: 1, createdAt: -1 });
 
+// Notify only after MongoDB has acknowledged a successful write.
+for (const operation of ['save', 'updateOne', 'findOneAndUpdate', 'updateMany']) {
+  taskTicketSchema.post(operation, function () {
+    require('../services/realtimeService').publishChange('TaskTicket');
+  });
+}
 module.exports = mongoose.model('TaskTicket', taskTicketSchema);

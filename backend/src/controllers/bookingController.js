@@ -24,12 +24,32 @@ const checkInGuest = async (req, res) => {
     }
 
     const checkInTime = new Date();
-    const checkOutTime = calculateCheckOut(checkInTime, stayPolicy || 'TWENTY_FOUR_HOUR');
+    const suppliedCheckout = req.body.checkOutTime;
+
+    if (suppliedCheckout !== undefined &&
+        (typeof suppliedCheckout !== 'string' ||
+         !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.test(suppliedCheckout))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Provide checkOutTime as an ISO date with a timezone.'
+      });
+    }
+
+    const checkOutTime = suppliedCheckout !== undefined
+      ? new Date(suppliedCheckout)
+      : calculateCheckOut(checkInTime, stayPolicy || 'TWENTY_FOUR_HOUR');
+
+    if (!Number.isFinite(checkOutTime.getTime()) || checkOutTime <= checkInTime) {
+      return res.status(400).json({
+        success: false,
+        message: 'Check-out must be a valid time after check-in.'
+      });
+    }
 
     const newBooking = await Booking.create({
       guestName,
       guestPhone,
-      telegramChatId: telegramChatId || '7089436555',
+      telegramChatId: telegramChatId || null,
       roomNumber,
       stayPolicy: stayPolicy || 'TWENTY_FOUR_HOUR',
       checkInTime,
@@ -66,7 +86,7 @@ const checkInGuest = async (req, res) => {
 
 const getActiveBookings = async (req, res) => {
   try {
-    const activeBookings = await Booking.find({ stayStatus: 'ACTIVE' }).sort({ createdAt: -1 });
+    const activeBookings = await Booking.find({ stayStatus: { $in: ['ACTIVE', 'EXTENDED'] } }).sort({ createdAt: -1 });
     return res.status(200).json({ success: true, count: activeBookings.length, bookings: activeBookings });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });

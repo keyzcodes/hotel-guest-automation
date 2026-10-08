@@ -1,0 +1,14 @@
+﻿
+# Dependencies, generated files, and local secrets
+node_modules/
+.next/
+.env
+.env.*
+*.log
+*.pem
+*.key
+coverage/
+out/
+dist/
+*.tsbuildinfo
+/frontend/next-env.d.ts

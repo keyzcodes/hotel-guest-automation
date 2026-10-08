@@ -10,23 +10,20 @@ dns.setServers(['8.8.8.8', '8.8.4.4']);
 dotenv.config();
 
 const app = express();
+const httpServer = require('http').createServer(app);
+require('./src/services/realtimeService').startRealtime(httpServer);
 app.use(cors());
 app.use(express.json());
 
 // Import Routes
 const bookingRoutes = require('./src/routes/bookingRoutes');
 const taskRoutes = require('./src/routes/taskRoutes');
-const demoRoutes = require('./src/routes/demo');
-const webhookRoutes = require('./src/routes/webhook');
 
-// Import Background Services (if active)
-// require('./src/services/scheduler'); 
 
 // Mount Routes
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/tasks', taskRoutes);
-app.use('/api/demo', demoRoutes);
-app.use('/api/webhook', webhookRoutes);
+app.use('/api/conversations', require('./src/routes/conversationRoutes'));
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'Hotel Ops Backend is running' });
@@ -39,7 +36,8 @@ mongoose
   .connect(MONGO_URI)
   .then(() => {
     console.log('✅ Connected to MongoDB Atlas');
-    app.listen(PORT, () => {
+    httpServer.listen(PORT, () => {
+      require('./src/services/telegramService').startTelegramBot();
       console.log(`🚀 Server listening on http://localhost:${PORT}`);
     });
   })
