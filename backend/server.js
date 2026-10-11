@@ -38,6 +38,7 @@ mongoose
     console.log('✅ Connected to MongoDB Atlas');
     httpServer.listen(PORT, () => {
       require('./src/services/telegramService').startTelegramBot();
+      require('./src/services/jobWorker').startJobWorker().catch(error => console.error('Job worker startup failed:', error.name));
       console.log(`🚀 Server listening on http://localhost:${PORT}`);
     });
   })

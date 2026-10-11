@@ -1,5 +1,5 @@
 const Booking = require('../models/Booking');
-const { sendWelcomeMessage, sendSatisfactionCheck } = require('../services/telegramService');
+const { scheduleCheckInJobs } = require('../services/schedulingService');
 
 const calculateCheckOut = (checkInDate, policy) => {
   const checkIn = new Date(checkInDate);
@@ -57,26 +57,21 @@ const checkInGuest = async (req, res) => {
       stayStatus: 'ACTIVE',
     });
 
-    if (newBooking.telegramChatId) {
-      await sendWelcomeMessage(newBooking.telegramChatId, guestName, roomNumber);
-
-      // Trigger satisfaction check in 15 seconds (for demo testing)
-      setTimeout(async () => {
-        try {
-          await sendSatisfactionCheck(newBooking.telegramChatId, guestName, roomNumber);
-          newBooking.pulseCheckStatus = 'SENT';
-          await newBooking.save();
-          console.log(`[Pulse Check] Sent to Room ${roomNumber}`);
-        } catch (err) {
-          console.error(`[Pulse Check Error]:`, err.message);
-        }
-      }, 15000);
+    let automationScheduled = true;
+    try {
+      const timings = process.env.JOB_DEMO_MODE === 'true'
+        ? { pulseDelayMs: 15000, checkoutReminderLeadMs: 30000 }
+        : {};
+      await scheduleCheckInJobs(newBooking, timings);
+    } catch (error) {
+      automationScheduled = false;
+      console.error('Booking saved but job scheduling failed:', error.name);
     }
-
     return res.status(201).json({
       success: true,
       message: `Guest ${guestName} checked into Room ${roomNumber}!`,
       booking: newBooking,
+      automationScheduled,
     });
   } catch (error) {
     console.error('Check-In Error:', error);

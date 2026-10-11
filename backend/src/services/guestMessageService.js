@@ -3,7 +3,7 @@ const Booking = require('../models/Booking');
 const TaskTicket = require('../models/TaskTicket');
 const hotel = require('../config/hotel');
 const { interpretGuestMessage, validateDecision } = require('./guestAiService');
-const { greetingFallback } = require('./guestFallbackService');
+const { serviceFallback } = require('./guestFallbackService');
 const openStatuses = ['Pending', 'In Progress', 'Escalated'];
 async function recordAndReply(ctx, inbound, text) {
   // Save before sending; do not automatically retry uncertain external sends.
@@ -62,9 +62,9 @@ async function processGuestMessage(ctx) {
     try {
       decision = await interpretGuestMessage({ text, hotel, booking, history: history.reverse(), tickets });
     } catch (error) {
-      decision = greetingFallback(text);
+      decision = serviceFallback(text, tickets);
       if (!decision) throw error;
-      console.warn('AI unavailable; local greeting fallback used:', error.name);
+      console.warn('AI unavailable; local fallback used:', error.name);
     }
     const outcome = await applyDecision(decision, inbound, booking, tickets);
     inbound.processingStatus = outcome.needsStaff ? 'NEEDS_STAFF' : 'PROCESSED';
