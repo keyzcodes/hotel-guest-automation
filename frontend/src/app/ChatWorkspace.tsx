@@ -3,11 +3,14 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import styles from './chat.module.css';
 type Message = { _id: string; direction: 'INBOUND' | 'OUTBOUND'; text: string; createdAt: string; sender?: string; deliveryState?: string };
 type Conversation = { _id: string; guestName: string; roomNumber: string; stayStatus: string; canReply: boolean; latestMessage?: Message; lastActivity: string };
-type Ticket = { _id: string; bookingId?: string | null; category: string; requestText: string; status: string };
+type Ticket = { _id: string; bookingId?: string | null; category: string; requestText: string; status: string; assignedStaff?: string | null; guestUpdates?: { text: string; messageId: string; createdAt: string }[] };
 const clock = (value: string) => new Date(value).toLocaleTimeString('en-NG', { timeZone: 'Africa/Lagos', hour: '2-digit', minute: '2-digit' });
 const day = (value: string) => new Date(value).toLocaleDateString('en-GB', { timeZone: 'Africa/Lagos', day: 'numeric', month: 'short', year: 'numeric' });
 const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map(value => value[0]).join('').toUpperCase();
-export default function ChatWorkspace({ api, revision, tickets, onTicket }: { api: string; revision: number; tickets: Ticket[]; onTicket: (id: string) => void }) {
+export default function ChatWorkspace({ api, revision, tickets }: { api: string; revision: number; tickets: Ticket[]; onTicket: (id: string) => void }) {
+  const [taskBusy, setTaskBusy] = useState('');
+  const [taskNotice, setTaskNotice] = useState('');
+  const [taskOverrides, setTaskOverrides] = useState<{ source: Ticket[]; values: Record<string, Ticket> }>({ source: tickets, values: {} });
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selected, setSelected] = useState('');
   const [search, setSearch] = useState('');
@@ -95,8 +98,21 @@ export default function ChatWorkspace({ api, revision, tickets, onTicket }: { ap
       setNotice(error instanceof Error ? error.message : 'Connection interrupted. Check reply status before sending again.');
     } finally { setSending(false); }
   }
+  async function updateTicket(ticket: Ticket, change: { status?: string; assignedStaff?: string }) {
+    if (taskBusy) return;
+    setTaskBusy(ticket._id); setTaskNotice('');
+    try {
+      const response = await fetch(`${api}/api/tasks/${ticket._id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change), signal: AbortSignal.timeout(30000) });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.message || 'Could not update request.');
+      setTaskOverrides(previous => ({ source: tickets, values: { ...(previous.source === tickets ? previous.values : {}), [ticket._id]: data.data } }));
+      setTaskNotice(data.message || 'Request completed.');
+    } catch (error) {
+      setTaskNotice(error instanceof Error ? `${error.message} Refresh to check the saved status before retrying.` : 'Update unconfirmed. Refresh to check the saved status.');
+    } finally { setTaskBusy(''); }
+  }
   const visible = conversations.filter(item => `${item.guestName} ${item.roomNumber}`.toLowerCase().includes(search.toLowerCase()));
-  const activeTickets = tickets.filter(item => item.bookingId === selected && item.status !== 'Resolved');
+  const activeTickets = tickets.map(item => (taskOverrides.source === tickets ? taskOverrides.values[item._id] : null) || item).filter(item => item.bookingId === selected && item.status !== 'Resolved');
   return <section ref={workspace} className={`${styles.workspace} ${selected ? styles.open : ''}`} aria-label="Guest conversations">
     <div className={styles.list}>
       <div className={styles.listHead}><h2>Conversations</h2><p>One thread per guest stay</p><input aria-label="Search conversations by guest or room" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search guest or room…" /></div>
@@ -117,7 +133,16 @@ export default function ChatWorkspace({ api, revision, tickets, onTicket }: { ap
             {messages.map((message, index) => <Fragment key={message._id}>{(index === 0 || day(messages[index - 1].createdAt) !== day(message.createdAt)) && <div className={styles.date}><span>{day(message.createdAt) === day(new Date().toISOString()) ? 'Today' : day(message.createdAt)}</span></div>}<article className={`${styles.bubble} ${message.direction === 'OUTBOUND' ? styles.outbound : styles.inbound}`}><span className={styles.sender}>{message.direction === 'INBOUND' ? 'Guest' : message.sender === 'STAFF' ? 'Reception' : 'Hotel'}</span><p>{message.text}</p><div className={styles.messageMeta}><time dateTime={message.createdAt} title={`${day(message.createdAt)} · Lagos time`}>{clock(message.createdAt)}</time>{message.direction === 'OUTBOUND' && message.sender === 'STAFF' && <span>{message.deliveryState === 'SENT' ? 'Sent to Telegram' : message.deliveryState === 'PENDING' ? 'Pending send confirmation' : 'Delivery unconfirmed'}</span>}</div></article></Fragment>)}
           </>}
         </div>
-        {activeTickets.length > 0 && <details className={styles.requests}><summary>{activeTickets.length} open {activeTickets.length === 1 ? 'request' : 'requests'} for this stay</summary><div>{activeTickets.map(ticket => <button key={ticket._id} onClick={() => onTicket(ticket._id)}><strong>{ticket.category} · {ticket.status}</strong><span>{ticket.requestText}</span></button>)}</div></details>}
+        <details className={styles.requests}>
+          <summary>{activeTickets.length} open {activeTickets.length === 1 ? 'request' : 'requests'} for this stay</summary>
+          {taskNotice && <p role="status" className={styles.notice}>{taskNotice}</p>}
+          <div>{activeTickets.map(ticket => <article className={styles.taskCard} key={ticket._id}>
+            <strong>{ticket.category} · {ticket.status}</strong><p>{ticket.requestText}</p>
+            {ticket.guestUpdates?.map(update => <p key={update.messageId}>Guest update · {day(update.createdAt)} {clock(update.createdAt)}: {update.text}</p>)}
+            {ticket.category === 'Front Desk' ? <p>Reception decision needed. Reply to the guest here; extension approval will use a separate booking action.</p> : <div className={styles.taskActions}><button disabled={Boolean(taskBusy)} onClick={() => void updateTicket(ticket, { status: 'Resolved' })}>{taskBusy === ticket._id ? 'Completing…' : 'Done · notify guest'}</button></div>}
+
+          </article>)}{!activeTickets.length && <p>No open requests for this stay.</p>}</div>
+        </details>
         <div className={styles.composeArea}>{notice && <div className={styles.notice} role="status">{notice}</div>}{!current.canReply && <p className={styles.notice}>Replies require an active stay linked to Telegram. Historical conversations remain available to read.</p>}<form className={styles.composer} onSubmit={reply}><textarea aria-label={`Reply to ${current.guestName}`} placeholder={`Reply to ${current.guestName.split(' ')[0]}…`} value={draft} maxLength={3000} rows={2} disabled={sending || uncertain || !current.canReply} onChange={event => setDraft(event.target.value)} /><button type="submit" disabled={sending || !draft.trim() || (!current.canReply && !uncertain)} aria-label={uncertain ? 'Check pending reply status' : 'Send reply'}>{sending ? 'Sending…' : uncertain ? 'Check status' : 'Send ↗'}</button></form><small className={styles.timezone}>Times shown in Lagos · {draft.length}/3000</small></div>
       </> : <div className={styles.welcome}><span className={styles.welcomeIcon}>✉</span><h2>Your guest conversations</h2><p>Select a guest to read their messages and reply.</p><small>Messages belong to a stay, even when a room is reused.</small></div>}
     </div>

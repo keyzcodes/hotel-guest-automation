@@ -68,4 +68,9 @@ messageSchema.add({
   deliveryState: { type: String, enum: ['NOT_TRACKED', 'PENDING', 'SENT', 'UNKNOWN'], default: 'NOT_TRACKED' },
 });
 
+messageSchema.add({
+  aiAction: { type: String, enum: ['ANSWER', 'CLARIFY', 'CREATE_REQUEST', 'FOLLOW_UP', 'HANDOFF'], default: null },
+  ticketId: { type: mongoose.Schema.Types.ObjectId, ref: 'TaskTicket', default: null },
+});
+
 module.exports = mongoose.model('Message', messageSchema);

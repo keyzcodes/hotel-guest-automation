@@ -62,4 +62,18 @@ for (const operation of ['save', 'updateOne', 'findOneAndUpdate', 'updateMany'])
     require('../services/realtimeService').publishChange('TaskTicket');
   });
 }
+taskTicketSchema.add({
+  sourceMessageId: { type: mongoose.Schema.Types.ObjectId, ref: 'Message', default: null },
+  guestUpdates: [{
+    _id: false,
+    messageId: { type: mongoose.Schema.Types.ObjectId, ref: 'Message', required: true },
+    text: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now },
+  }],
+});
+taskTicketSchema.index({ sourceMessageId: 1 }, {
+  unique: true,
+  partialFilterExpression: { sourceMessageId: { $type: 'objectId' } },
+});
+
 module.exports = mongoose.model('TaskTicket', taskTicketSchema);
