@@ -111,7 +111,12 @@ export default function ChatWorkspace({ api, revision, tickets }: { api: string;
       setTaskNotice(error instanceof Error ? `${error.message} Refresh to check the saved status before retrying.` : 'Update unconfirmed. Refresh to check the saved status.');
     } finally { setTaskBusy(''); }
   }
-  const visible = conversations.filter(item => `${item.guestName} ${item.roomNumber}`.toLowerCase().includes(search.toLowerCase()));
+const visible = conversations.filter(item =>
+  item.stayStatus !== 'CANCELLED' &&
+  `${item.guestName} ${item.roomNumber}`
+    .toLowerCase()
+    .includes(search.toLowerCase())
+);
   const activeTickets = tickets.map(item => (taskOverrides.source === tickets ? taskOverrides.values[item._id] : null) || item).filter(item => item.bookingId === selected && item.status !== 'Resolved');
   return <section ref={workspace} className={`${styles.workspace} ${selected ? styles.open : ''}`} aria-label="Guest conversations">
     <div className={styles.list}>
