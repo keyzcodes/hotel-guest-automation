@@ -1,15 +1,15 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const bookingSchema = new mongoose.Schema(
   {
     guestName: {
       type: String,
-      required: [true, 'Guest name is required'],
+      required: [true, "Guest name is required"],
       trim: true,
     },
     guestPhone: {
       type: String,
-      required: [true, 'Guest phone number is required'],
+      required: [true, "Guest phone number is required"],
       trim: true,
     },
     telegramChatId: {
@@ -18,7 +18,7 @@ const bookingSchema = new mongoose.Schema(
     },
     roomNumber: {
       type: String,
-      required: [true, 'Room number is required'],
+      required: [true, "Room number is required"],
       trim: true,
     },
     checkInTime: {
@@ -27,22 +27,26 @@ const bookingSchema = new mongoose.Schema(
     },
     checkOutTime: {
       type: Date,
-      required: [true, 'Check-out time is required'],
+      required: [true, "Check-out time is required"],
     },
     stayPolicy: {
       type: String,
-      enum: ['FIXED_NOON', 'TWELVE_HOUR', 'TWENTY_FOUR_HOUR'],
-      default: 'TWENTY_FOUR_HOUR',
+      enum: ["FIXED_NOON", "TWELVE_HOUR", "TWENTY_FOUR_HOUR"],
+      default: "TWENTY_FOUR_HOUR",
     },
     pulseCheckStatus: {
       type: String,
-      enum: ['PENDING', 'SENT', 'ALL_GOOD', 'ISSUE_REPORTED'],
-      default: 'PENDING',
+      enum: ["PENDING", "SENT", "ALL_GOOD", "ISSUE_REPORTED"],
+      default: "PENDING",
     },
     stayStatus: {
       type: String,
-      enum: ['ACTIVE', 'EXTENDED', 'COMPLETED', 'CANCELLED'],
-      default: 'ACTIVE',
+      enum: ["ACTIVE", "EXTENDED", "COMPLETED", "CANCELLED"],
+      default: "ACTIVE",
+    },
+    extensionPromptMessageId: {
+      type: Number,
+      default: null,
     },
     guestRating: {
       type: Number,
@@ -53,13 +57,18 @@ const bookingSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Notify only after MongoDB has acknowledged a successful write.
-for (const operation of ['save', 'updateOne', 'findOneAndUpdate', 'updateMany']) {
+for (const operation of [
+  "save",
+  "updateOne",
+  "findOneAndUpdate",
+  "updateMany",
+]) {
   bookingSchema.post(operation, function () {
-    require('../services/realtimeService').publishChange('Booking');
+    require("../services/realtimeService").publishChange("Booking");
   });
 }
-module.exports = mongoose.model('Booking', bookingSchema);
+module.exports = mongoose.model("Booking", bookingSchema);
