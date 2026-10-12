@@ -2,3 +2,27 @@
 @media(min-width:700px){.main{padding:34px 30px 100px}.titleRow{flex-direction:row;align-items:center;justify-content:space-between}.titleRow>.primary{align-self:center;white-space:nowrap}.metric{padding:22px}.metricIcon{display:block}.requestRow .tag{display:block}.requestRow small{max-width:320px}.stays{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(min-width:1050px){.app{display:flex}.sidebar{display:flex;flex-direction:column;width:224px;position:fixed;inset:0 auto 0 0;background:var(--surface);border-right:1px solid var(--border);padding:30px 18px;z-index:25}.brand{display:flex;align-items:center;gap:10px;margin-bottom:40px}.logo{background:var(--blue);color:white;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-size:20px;font-weight:bold}.brand strong{font-size:15px}.brand small{font-size:8px;letter-spacing:.15em;display:block;margin-top:5px}.sidebar nav{display:grid;gap:8px}.sidebar nav button{justify-content:flex-start;border:0;font-size:12px;padding:12px}.sideFoot{margin-top:auto;padding:14px 6px}.sideFoot p{font-size:12px}.sideFoot small{font-size:10px}.body{margin-left:224px;width:calc(100% - 224px)}.header{padding:0 34px}.breadcrumb{display:block;font-size:12px;color:var(--muted)}.breadcrumb span{margin:0 12px}.mobileBrand,.mobileNav{display:none}.connection{max-width:none}.main{padding:38px 34px}.app h1{font-size:32px}.metrics{grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}.grid{grid-template-columns:1fr 1fr}.inbox{display:grid;grid-template-columns:340px 1fr;min-height:560px}.list{border-right:1px solid var(--border);max-height:720px;overflow:auto}.detail{display:block;padding:26px}.detailOpen{position:static;overflow:visible}.back{display:none!important}.inbox .requestRow small{max-width:240px}.stays{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(prefers-reduced-motion:no-preference){.app button{transition:background .15s}.track>span{transition:width .3s}}
+.stays .panelHead {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.stays .panelHead > div {
+  flex: 1 1 180px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.stays .panelHead > button {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  padding: 10px 14px;
+}
+
+@media (max-width: 699px) {
+  .stays .panelHead > button {
+    width: 100%;
+  }
+}

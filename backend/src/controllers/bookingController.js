@@ -1,5 +1,10 @@
+const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
-const { scheduleCheckInJobs } = require('../services/schedulingService');
+const ScheduledJob = require('../models/ScheduledJob');
+const {
+  scheduleCheckInJobs,
+  scheduleReviewJob,
+} = require('../services/schedulingService');
 
 const calculateCheckOut = (checkInDate, policy) => {
   const checkIn = new Date(checkInDate);
@@ -87,5 +92,113 @@ const getActiveBookings = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
+const confirmCheckout = async (req, res) => {
+  const { id } = req.params;
 
-module.exports = { checkInGuest, getActiveBookings };
+  if (!mongoose.isObjectIdOrHexString(id)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid booking ID.',
+    });
+  }
+
+  let booking;
+
+  try {
+    // Only the first successful confirmation sets the departure timestamp.
+    booking = await Booking.findOneAndUpdate(
+      {
+        _id: id,
+        stayStatus: { $in: ['ACTIVE', 'EXTENDED'] },
+      },
+      {
+        $set: {
+          stayStatus: 'COMPLETED',
+          confirmedCheckoutAt: new Date(),
+          extensionPromptMessageId: null,
+        },
+      },
+      { returnDocument: 'after', runValidators: true }
+    );
+
+    if (!booking) {
+      booking = await Booking.findById(id);
+
+      if (!booking) {
+        return res.status(404).json({
+          success: false,
+          message: 'Booking not found.',
+        });
+      }
+
+      if (
+        booking.stayStatus !== 'COMPLETED' ||
+        !booking.confirmedCheckoutAt
+      ) {
+        return res.status(409).json({
+          success: false,
+          message: 'This stay cannot be checked out through this action.',
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Checkout save failed:', error.name);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Checkout could not be confirmed. Refresh the stay before retrying.',
+    });
+  }
+
+  // Checkout remains saved even if scheduling needs another attempt.
+  const warnings = [];
+  let reviewScheduled = false;
+
+  try {
+    await ScheduledJob.updateMany(
+      {
+        bookingId: booking._id,
+        type: { $in: ['WELCOME', 'PULSE_CHECK', 'PRE_CHECKOUT'] },
+        status: 'PENDING',
+      },
+      {
+        $set: {
+          status: 'CANCELLED',
+          lastError: 'Reception confirmed checkout.',
+        },
+      },
+      { runValidators: true }
+    );
+  } catch (error) {
+    console.error('Checkout job cleanup failed:', error.name);
+    warnings.push('Reminder cleanup needs another attempt.');
+  }
+
+  if (booking.telegramChatId) {
+    try {
+      await ScheduledJob.init();
+      await scheduleReviewJob(booking, booking.confirmedCheckoutAt);
+      reviewScheduled = true;
+    } catch (error) {
+      console.error('Checkout review scheduling failed:', error.name);
+      warnings.push('Review scheduling needs another attempt.');
+    }
+  }
+
+  return res.status(200).json({
+    success: true,
+    message: warnings.length
+      ? 'Checkout confirmed. Some follow-up actions need another attempt.'
+      : 'Checkout confirmed.',
+    booking,
+    reviewScheduled,
+    followUpComplete: warnings.length === 0,
+    warnings,
+  });
+};
+
+module.exports = {
+  checkInGuest,
+  getActiveBookings,
+  confirmCheckout,
+};

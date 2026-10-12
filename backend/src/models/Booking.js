@@ -44,6 +44,10 @@ const bookingSchema = new mongoose.Schema(
       enum: ["ACTIVE", "EXTENDED", "COMPLETED", "CANCELLED"],
       default: "ACTIVE",
     },
+    confirmedCheckoutAt: {
+      type: Date,
+      default: null,
+    },
     extensionPromptMessageId: {
       type: Number,
       default: null,
