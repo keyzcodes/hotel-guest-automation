@@ -6,6 +6,7 @@ import ChatWorkspace from "./ChatWorkspace";
 import styles from "./dashboard.module.css";
 
 type Ticket = {
+  requiresReceptionReview?: boolean;
   _id: string;
   bookingId?: string | null;
   guestName: string;
@@ -327,10 +328,13 @@ export default function Dashboard() {
     setSaving(true);
     setNotice("");
     try {
-      const response = await fetch(`${API}/api/tasks/${current._id}`, {
-        method: "PATCH",
+      // Department work can still use In Progress; review closure has no guest send.
+      const review = current.requiresReceptionReview || ['Front Desk', 'General Inquiry'].includes(current.category);
+      const closeReview = review && status === 'Resolved';
+      const response = await fetch(`${API}/api/tasks/${current._id}${closeReview ? '/close-review' : ''}`, {
+        method: closeReview ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(closeReview ? {} : { status }),
         signal: AbortSignal.timeout(30000),
       });
       const data = await response.json();
@@ -707,6 +711,7 @@ export default function Dashboard() {
               revision={revision}
               tickets={tickets}
               initialBookingId={conversationTarget}
+              initialScope={conversationTarget && !bookings.some(booking => booking._id === conversationTarget) ? "History" : "Current"}
             />
           )}
           {view === "Requests" && (
@@ -843,13 +848,12 @@ export default function Dashboard() {
                       <button
                         disabled={
                           saving ||
-                          requestScope === "History" ||
-                          current.status === "Resolved" ||
-                          current.category === "Front Desk"
+                          (requestScope === "History" && !current.requiresReceptionReview) ||
+                          current.status === "Resolved"
                         }
                         onClick={() => void changeStatus("Resolved")}
                       >
-                        Complete & notify
+                        {current.requiresReceptionReview || ["Front Desk", "General Inquiry"].includes(current.category) ? "Close review" : "Complete & notify"}
                       </button>
                       <button
                         disabled={

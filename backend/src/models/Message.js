@@ -73,4 +73,14 @@ messageSchema.add({
   ticketId: { type: mongoose.Schema.Types.ObjectId, ref: 'TaskTicket', default: null },
 });
 
+messageSchema.add({
+  staffReadAt: { type: Date, default: null },
+  staffAnsweredAt: { type: Date, default: null },
+  staffReplyThrough: {
+    messageId: { type: mongoose.Schema.Types.ObjectId, ref: 'Message' },
+    createdAt: { type: Date },
+  },
+});
+messageSchema.index({ bookingId: 1, direction: 1, staffReadAt: 1 });
+
 module.exports = mongoose.model('Message', messageSchema);

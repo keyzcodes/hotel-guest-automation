@@ -4,7 +4,8 @@ const Message = require('../models/Message');
 async function completeTask(id) {
   const ticket = await TaskTicket.findById(id);
   if (!ticket) return { code: 404, success: false, message: 'Request not found.' };
-  if (ticket.category === 'Front Desk') return { code: 409, success: false, message: 'This request needs a reception decision. Completing a task cannot approve extensions, payments or checkout.' };
+  // Reception categories and grouped outage reviews never send service confirmations.
+  if (ticket.category === 'Front Desk' || ticket.category === 'General Inquiry' || ticket.staffReviewKey) return { code: 409, success: false, message: 'This request needs reception review. Reply to the guest, then use Close review.' };
   const booking = ticket.bookingId && await Booking.findById(ticket.bookingId);
   if (!booking || !booking.telegramChatId || !['ACTIVE', 'EXTENDED'].includes(booking.stayStatus)) return { code: 409, success: false, message: 'An active stay linked to Telegram is required to complete and notify.' };
   const owners = await Booking.find({ telegramChatId: booking.telegramChatId, stayStatus: { $in: ['ACTIVE', 'EXTENDED'] } }).select('_id').limit(2);
@@ -23,7 +24,7 @@ async function completeTask(id) {
       if (!outgoing) throw error;
     }
   }
-  const saved = await TaskTicket.findByIdAndUpdate(id, { $set: { status: 'Resolved' } }, { new: true, runValidators: true });
+  const saved = await TaskTicket.findByIdAndUpdate(id, { $set: { status: 'Resolved' } }, { returnDocument: 'after', runValidators: true });
   if (ownsSend) {
     try {
       const sent = await require('./telegramService').sendStaffReply(booking.telegramChatId, outgoing.text);

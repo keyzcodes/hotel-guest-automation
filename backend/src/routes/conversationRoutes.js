@@ -3,7 +3,9 @@ const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
 const Message = require('../models/Message');
 const router = express.Router();
-const fields = '_id direction text channel sender deliveryState processingStatus createdAt';
+const { unreadFilter, acknowledgeReply, attentionLookup } = require('../services/conversationAttentionService');
+const reconcileReply = reply => acknowledgeReply(Message, reply).catch(error => console.error('Reply attention update failed:', error.name));
+const fields = '_id direction text channel sender deliveryState processingStatus createdAt staffReadAt';
 const publicMessage = message => {
   const result = message.toObject ? message.toObject() : message;
   return Object.fromEntries(fields.split(' ').filter(key => result[key] !== undefined).map(key => [key, result[key]]));
@@ -12,7 +14,18 @@ router.get('/', async (req, res) => {
   try {
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
     if (!Number.isInteger(limit)) return res.status(400).json({ success: false, message: 'Invalid limit.' });
+    const scope = req.query.scope;
+    if (scope !== undefined && !['Current', 'History'].includes(scope)) return res.status(400).json({ success: false, message: 'Invalid conversation scope.' });
+    const scoped = scope === 'Current'
+      ? { stayStatus: { $in: ['ACTIVE', 'EXTENDED'] } }
+      : scope === 'History' ? { stayStatus: { $in: ['COMPLETED'] } } : {};
     const conversations = await Booking.aggregate([
+      { $match: scoped },
+      attentionLookup(Message.collection.name),
+      { $set: {
+        unreadCount: { $ifNull: [{ $arrayElemAt: ['$attention.unreadCount', 0] }, 0] },
+        needsReplyCount: { $ifNull: [{ $arrayElemAt: ['$attention.needsReplyCount', 0] }, 0] },
+      } },
       { $lookup: { from: Message.collection.name, let: { booking: '$_id' }, pipeline: [
         { $match: { $expr: { $eq: ['$bookingId', '$$booking'] } } },
         { $sort: { createdAt: -1, _id: -1 } }, { $limit: 1 },
@@ -23,8 +36,8 @@ router.get('/', async (req, res) => {
         { $ne: [{ $ifNull: ['$telegramChatId', null] }, null] },
         { $ne: ['$telegramChatId', ''] },
       ] }, lastActivity: { $ifNull: [{ $arrayElemAt: ['$latest.createdAt', 0] }, '$createdAt'] } } },
-      { $sort: { lastActivity: -1, _id: -1 } }, { $limit: limit + 1 },
-      { $project: { guestName: 1, roomNumber: 1, stayStatus: 1, latestMessage: 1, canReply: 1, lastActivity: 1 } },
+      { $sort: scope === 'Current' ? { needsReplyCount: -1, unreadCount: -1, lastActivity: -1, _id: -1 } : { lastActivity: -1, _id: -1 } }, { $limit: limit + 1 },
+      { $project: { guestName: 1, roomNumber: 1, stayStatus: 1, checkInTime: 1, checkOutTime: 1, unreadCount: 1, needsReplyCount: 1, latestMessage: 1, canReply: 1, lastActivity: 1 } },
     ]);
     res.json({ success: true, conversations: conversations.slice(0, limit), hasMore: conversations.length > limit });
   } catch (error) {
@@ -47,6 +60,22 @@ router.get('/:bookingId/messages', async (req, res) => {
     res.status(500).json({ success: false, message: 'Could not load the conversation.' });
   }
 });
+router.post('/:bookingId/read', async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const ids = req.body?.messageIds;
+    if (!mongoose.isObjectIdOrHexString(bookingId) || !Array.isArray(ids) || !ids.length || ids.length > 500 || ids.some(id => !mongoose.isObjectIdOrHexString(id))) {
+      return res.status(400).json({ success: false, message: 'Provide a valid booking and 1–500 message IDs.' });
+    }
+    if (!await Booking.exists({ _id: bookingId })) return res.status(404).json({ success: false, message: 'Booking not found.' });
+    // Only messages returned to the browser are marked read. Later arrivals remain unread.
+    const result = await Message.updateMany(unreadFilter(bookingId, ids), { $set: { staffReadAt: new Date() } });
+    return res.json({ success: true, readCount: result.modifiedCount });
+  } catch (error) {
+    console.error('Conversation read acknowledgement failed:', error.name);
+    return res.status(500).json({ success: false, message: 'Could not update read status.' });
+  }
+});
 router.post('/:bookingId/reply', async (req, res) => {
   let message;
   try {
@@ -59,6 +88,7 @@ router.post('/:bookingId/reply', async (req, res) => {
     const existing = await Message.findOne({ idempotencyKey: key });
     if (existing) {
       if (existing.text !== text.trim()) return res.status(409).json({ success: false, message: 'This request ID belongs to a different reply.' });
+      await reconcileReply(existing);
       return res.json({ success: true, message: publicMessage(existing) });
     }
     const booking = await Booking.findById(bookingId);
@@ -66,12 +96,15 @@ router.post('/:bookingId/reply', async (req, res) => {
     if (!['ACTIVE', 'EXTENDED'].includes(booking.stayStatus) || !booking.telegramChatId) return res.status(409).json({ success: false, message: 'This stay is closed or has no linked Telegram chat.' });
     const linked = await Booking.find({ telegramChatId: booking.telegramChatId, stayStatus: { $in: ['ACTIVE', 'EXTENDED'] } }).select('_id').limit(2);
     if (linked.length !== 1 || String(linked[0]._id) !== bookingId) return res.status(409).json({ success: false, message: 'Telegram chat is linked ambiguously. Resolve the bookings before replying.' });
+    const latestInbound = await Message.findOne({ bookingId, direction: 'INBOUND' }).sort({ createdAt: -1, _id: -1 }).select('_id createdAt').lean();
+    const staffReplyThrough = latestInbound ? { messageId: latestInbound._id, createdAt: latestInbound.createdAt } : undefined;
     try {
-      message = await Message.create({ bookingId, channel: 'TELEGRAM', chatId: booking.telegramChatId, direction: 'OUTBOUND', sender: 'STAFF', text: text.trim(), idempotencyKey: key, processingStatus: 'NOT_APPLICABLE', deliveryState: 'PENDING' });
+      message = await Message.create({ bookingId, channel: 'TELEGRAM', chatId: booking.telegramChatId, direction: 'OUTBOUND', sender: 'STAFF', staffReplyThrough, text: text.trim(), idempotencyKey: key, processingStatus: 'NOT_APPLICABLE', deliveryState: 'PENDING' });
     } catch (error) {
       if (error.code !== 11000) throw error;
       const duplicate = await Message.findOne({ idempotencyKey: key });
       if (!duplicate || duplicate.text !== text.trim()) return res.status(409).json({ success: false, message: 'Reply request conflict.' });
+      await reconcileReply(duplicate);
       return res.json({ success: true, message: publicMessage(duplicate) });
     }
     // Persist first. Repeated HTTP requests with this key NEVER send again.
@@ -79,6 +112,7 @@ router.post('/:bookingId/reply', async (req, res) => {
     message.providerMessageId = String(sent.message_id);
     message.deliveryState = 'SENT';
     await message.save();
+    await reconcileReply(message);
     return res.status(201).json({ success: true, message: publicMessage(message) });
   } catch (error) {
     console.error('Staff reply failed:', error.message);
