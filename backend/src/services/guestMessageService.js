@@ -140,6 +140,11 @@ async function processGuestMessage(ctx) {
       );
       return;
     }
+    booking = linked[0];
+    inbound.bookingId = booking._id;
+    inbound.processingStatus = "PROCESSING";
+    await inbound.save();
+
     const replyTo = ctx.message.reply_to_message?.message_id;
 
     if (
@@ -254,10 +259,6 @@ async function processGuestMessage(ctx) {
       );
       return;
     }
-    booking = linked[0];
-    inbound.bookingId = booking._id;
-    inbound.processingStatus = "PROCESSING";
-    await inbound.save();
     const [history, tickets] = await Promise.all([
       Message.find({
         bookingId: booking._id,

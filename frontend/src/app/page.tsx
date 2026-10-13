@@ -201,16 +201,16 @@ export default function Dashboard() {
     return () => window.clearTimeout(timer);
   }, []);
   useEffect(() => {
-  if (notice !== 'Checkout confirmed.') return;
+    if (notice !== "Checkout confirmed.") return;
 
-  const timer = window.setTimeout(() => {
-    setNotice(current =>
-      current === 'Checkout confirmed.' ? '' : current
-    );
-  }, 5000);
+    const timer = window.setTimeout(() => {
+      setNotice((current) =>
+        current === "Checkout confirmed." ? "" : current,
+      );
+    }, 5000);
 
-  return () => window.clearTimeout(timer);
-}, [notice]);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
   const toggleTheme = () => {
     setDark(!dark);
     localStorage.setItem("hotel-theme", !dark ? "dark" : "light");
@@ -804,9 +804,9 @@ export default function Dashboard() {
                     </div>
                     <button
                       disabled={Boolean(checkoutBusy)}
-                      onClick={() => void confirmCheckout(checkoutRetry, true)}
+                      onClick={() => void confirmCheckout(checkoutRetry)}
                     >
-                      Check / retry
+                      Retry checkout confirmation
                     </button>
                   </div>
                 </section>
@@ -914,9 +914,25 @@ export default function Dashboard() {
                     type={f.type}
                     required={f.key !== "telegramChatId"}
                     value={form[f.key as keyof typeof form]}
-                    onChange={(e) =>
-                      setForm({ ...form, [f.key]: e.target.value })
-                    }
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setForm((current) => ({ ...current, [f.key]: value }));
+
+                      if (f.key === "checkOutTime") {
+                        const checkout = new Date(value);
+
+                        if (
+                          Number.isFinite(checkout.getTime()) &&
+                          checkout > new Date()
+                        ) {
+                          setNotice((current) =>
+                            current === "Choose a checkout time in the future."
+                              ? ""
+                              : current,
+                          );
+                        }
+                      }
+                    }}
                   />
                 </label>
               ))}
@@ -926,7 +942,21 @@ export default function Dashboard() {
                 without Telegram messages.
               </p>
               {notice && (
-                <div role="status" className={styles.alert}>
+                <div
+                  role="status"
+                  className={styles.alert}
+                  style={
+                    notice === "Choose a checkout time in the future."
+                      ? {
+                          color: "#991b1b",
+                          backgroundColor: "#fef2f2",
+                          border: "1px solid #f87171",
+                          padding: "12px",
+                          borderRadius: "8px",
+                        }
+                      : undefined
+                  }
+                >
                   {notice}
                 </div>
               )}

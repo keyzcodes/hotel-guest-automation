@@ -93,6 +93,11 @@ const getActiveBookings = async (req, res) => {
   }
 };
 const confirmCheckout = async (req, res) => {
+    console.info('Checkout endpoint called:', {
+    bookingId: req.params.id,
+    time: new Date().toISOString(),
+    origin: req.get('origin') || 'not supplied',
+  });
   const { id } = req.params;
 
   if (!mongoose.isObjectIdOrHexString(id)) {
