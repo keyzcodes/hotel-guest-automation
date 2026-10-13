@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import ChatWorkspace from "./ChatWorkspace";
 import styles from "./dashboard.module.css";
@@ -26,7 +26,7 @@ type Booking = {
   stayStatus: string;
   telegramChatId?: string | null;
 };
-type View = "Overview" | "Conversations" | "Requests" | "Guest journey";
+type View = "Overview" | "Conversations" | "Requests" | "Stays";
 const API = (
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 ).replace(/\/$/, "");
@@ -50,7 +50,7 @@ function Icon({ name }: { name: string }) {
     Conversations: "M3 4h18v14H8l-5 3z M7 8h10 M7 12h7",
     Overview: "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
     Requests: "M3 4h18v14H8l-5 3z M7 8h10 M7 12h7",
-    "Guest journey": "M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6",
+    Stays: "M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6",
     sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M12 2v2 M12 20v2 M2 12h2 M20 12h2 M5 5l1 1 M18 18l1 1 M5 19l1-1 M18 6l1-1",
     moon: "M20 15A9 9 0 0 1 9 4a9 9 0 1 0 11 11",
     arrow: "M5 12h14 M14 7l5 5-5 5",
@@ -72,13 +72,18 @@ function Icon({ name }: { name: string }) {
   );
 }
 export default function Dashboard() {
+  const refreshFlight = useRef<Promise<void> | null>(null);
+  const [draftReady, setDraftReady] = useState(false);
+  const [requestScope, setRequestScope] = useState("Current");
+  const [staySearch, setStaySearch] = useState("");
+  const [conversationTarget, setConversationTarget] = useState("");
   const [revision, setRevision] = useState(0);
   const [view, setView] = useState<View>("Overview");
   const [dark, setDark] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [selected, setSelected] = useState<string>("");
-  const [filter, setFilter] = useState("All");
+  const [filter, setFilter] = useState("Open");
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -98,43 +103,64 @@ export default function Dashboard() {
     telegramChatId: "",
   });
   const refresh = useCallback(async (signal?: AbortSignal) => {
-    setBusy(true);
+    if (refreshFlight.current) return refreshFlight.current;
+    const task = (async () => {
+      setBusy(true);
+      const timeout = AbortSignal.timeout(12000);
+      const requestSignal = signal
+        ? AbortSignal.any([signal, timeout])
+        : timeout;
+      try {
+        const responses = await Promise.all([
+          fetch(`${API}/api/tasks`, {
+            signal: requestSignal,
+            cache: "no-store",
+          }),
+          fetch(`${API}/api/bookings/active`, {
+            signal: requestSignal,
+            cache: "no-store",
+          }),
+        ]);
+        if (responses.some((r) => !r.ok))
+          throw new Error("The backend could not load the dashboard.");
+        const [tasks, stays] = await Promise.all(
+          responses.map((r) => r.json()),
+        );
+        if (
+          !tasks.success ||
+          !stays.success ||
+          !Array.isArray(tasks.data) ||
+          !Array.isArray(stays.bookings)
+        )
+          throw new Error("Unexpected response from the backend.");
+        setTickets(tasks.data);
+        setBookings(stays.bookings);
+        setRevision((value) => value + 1);
+        setConnected(true);
+        setError("");
+        setUpdated(
+          new Date().toLocaleTimeString("en-NG", {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        );
+      } catch (e) {
+        if (signal?.aborted) return;
+        setConnected(false);
+        setError(
+          e instanceof Error
+            ? e.message
+            : "Connection failed. Check that the backend is running on port 5000.",
+        );
+      } finally {
+        setBusy(false);
+      }
+    })();
+    refreshFlight.current = task;
     try {
-      const responses = await Promise.all([
-        fetch(`${API}/api/tasks`, { signal, cache: "no-store" }),
-        fetch(`${API}/api/bookings/active`, { signal, cache: "no-store" }),
-      ]);
-      if (responses.some((r) => !r.ok))
-        throw new Error("The backend could not load the dashboard.");
-      const [tasks, stays] = await Promise.all(responses.map((r) => r.json()));
-      if (
-        !tasks.success ||
-        !stays.success ||
-        !Array.isArray(tasks.data) ||
-        !Array.isArray(stays.bookings)
-      )
-        throw new Error("Unexpected response from the backend.");
-      setTickets(tasks.data);
-      setBookings(stays.bookings);
-      setRevision((value) => value + 1);
-      setConnected(true);
-      setError("");
-      setUpdated(
-        new Date().toLocaleTimeString("en-NG", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      );
-    } catch (e) {
-      if (signal?.aborted) return;
-      setConnected(false);
-      setError(
-        e instanceof Error
-          ? e.message
-          : "Connection failed. Check that the backend is running on port 5000.",
-      );
+      await task;
     } finally {
-      if (!signal?.aborted) setBusy(false);
+      if (refreshFlight.current === task) refreshFlight.current = null;
     }
   }, []);
   useEffect(() => {
@@ -211,15 +237,83 @@ export default function Dashboard() {
 
     return () => window.clearTimeout(timer);
   }, [notice]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = sessionStorage.getItem("hotel-checkin-draft");
+
+        if (saved) {
+          const value = JSON.parse(saved);
+
+          if (value && typeof value === "object") {
+            setForm(
+              (current) =>
+                Object.fromEntries(
+                  Object.keys(current).map((key) => [
+                    key,
+                    typeof value[key] === "string" ? value[key] : "",
+                  ]),
+                ) as typeof current,
+            );
+          }
+        }
+      } catch {
+        // An unavailable or invalid draft must not block check-in.
+      }
+      try {
+        setShowForm(sessionStorage.getItem("hotel-checkin-open") === "true");
+      } catch {
+        // Storage may be unavailable.
+      }
+      setDraftReady(true);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
+  useEffect(() => {
+    if (!draftReady) return;
+
+    try {
+      if (showForm) {
+        sessionStorage.setItem("hotel-checkin-open", "true");
+      } else {
+        sessionStorage.removeItem("hotel-checkin-open");
+      }
+    } catch {
+      // Storage may be unavailable.
+    }
+  }, [showForm, draftReady]);
+  useEffect(() => {
+    if (!draftReady) return;
+    try {
+      if (Object.values(form).some(Boolean))
+        sessionStorage.setItem("hotel-checkin-draft", JSON.stringify(form));
+      else sessionStorage.removeItem("hotel-checkin-draft");
+    } catch {
+      /* Storage can be unavailable on shared browsers. */
+    }
+  }, [form, draftReady]);
   const toggleTheme = () => {
     setDark(!dark);
     localStorage.setItem("hotel-theme", !dark ? "dark" : "light");
   };
-  const open = tickets.filter((t) => t.status !== "Resolved");
+  const currentStayIds = new Set(bookings.map((booking) => booking._id));
+  const currentTickets = tickets.filter(
+    (ticket) => ticket.bookingId && currentStayIds.has(ticket.bookingId),
+  );
+  const open = currentTickets.filter((t) => t.status !== "Resolved");
+  const scopedTickets =
+    requestScope === "Current"
+      ? currentTickets
+      : tickets.filter(
+          (ticket) =>
+            !ticket.bookingId || !currentStayIds.has(ticket.bookingId),
+        );
   const current = tickets.find((t) => t._id === selected);
-  const filtered = tickets.filter(
+  const filtered = scopedTickets.filter(
     (t) =>
-      (filter === "All" || t.status === filter) &&
+      (filter === "All" ||
+        (filter === "Open" ? t.status !== "Resolved" : t.status === filter)) &&
       `${t.guestName} ${t.roomNumber} ${t.requestText} ${t.category}`
         .toLowerCase()
         .includes(search.toLowerCase()),
@@ -237,6 +331,7 @@ export default function Dashboard() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
+        signal: AbortSignal.timeout(30000),
       });
       const data = await response.json();
       if (!response.ok || !data.success)
@@ -244,9 +339,7 @@ export default function Dashboard() {
       setTickets((old) =>
         old.map((t) => (t._id === current._id ? data.data : t)),
       );
-      setNotice(
-        "Request status saved. Guest notification is not connected yet.",
-      );
+      setNotice(data.message || "Request status saved.");
     } catch (e) {
       setNotice(e instanceof Error ? e.message : "Update failed.");
     } finally {
@@ -325,6 +418,7 @@ export default function Dashboard() {
       const response = await fetch(`${API}/api/bookings/check-in`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(30000),
         body: JSON.stringify({
           ...form,
           telegramChatId: form.telegramChatId.trim() || null,
@@ -337,9 +431,13 @@ export default function Dashboard() {
         throw new Error(
           "Check-in could not finish. Refresh active stays before retrying: a booking may already have been saved.",
         );
+      setConversationTarget(data.booking._id);
+      setView("Conversations");
       setShowForm(false);
       setNotice(
-        "Booking created. Check Telegram for the welcome; delivery history is not connected yet.",
+        data.automationScheduled
+          ? "Guest checked in. Welcome scheduled."
+          : "Guest checked in. Messaging needs attention.",
       );
       setForm({
         guestName: "",
@@ -360,7 +458,7 @@ export default function Dashboard() {
     }
   }
   const nav = (
-    ["Overview", "Conversations", "Requests", "Guest journey"] as View[]
+    ["Overview", "Conversations", "Requests", "Stays"] as View[]
   ).map((item) => (
     <button
       key={item}
@@ -401,9 +499,11 @@ export default function Dashboard() {
           <div className={styles.headerActions}>
             <span className={styles.connection}>
               {!connected
-                ? "Backend disconnected"
+                ? busy && !updated
+                  ? "Connecting"
+                  : "Reconnecting"
                 : live
-                  ? "Live connected"
+                  ? "Connected"
                   : "Live reconnecting"}
             </span>
             <button
@@ -426,12 +526,12 @@ export default function Dashboard() {
               </span>
               <h1>
                 {view === "Conversations"
-                  ? "Every guest. One conversation."
+                  ? "Conversations"
                   : view === "Overview"
-                    ? "Your service, at a glance."
+                    ? "Overview"
                     : view === "Requests"
-                      ? "Every request. One workspace."
-                      : "A clear view of every stay."}
+                      ? "Requests"
+                      : "Stays"}
               </h1>
               <p>
                 {view === "Conversations"
@@ -440,7 +540,7 @@ export default function Dashboard() {
                     ? "Know what needs attention, and what your team has handled."
                     : view === "Requests"
                       ? "Requests recorded from guest messages, ready for your team."
-                      : "Active guest stays and their recorded check-in progress."}
+                      : "Current guests, rooms and checkout times."}
               </p>
             </div>
             <button
@@ -486,26 +586,28 @@ export default function Dashboard() {
                   {
                     label: "Needs attention",
                     value: open.length,
-                    note: "All unresolved requests",
+                    note: "Current guest requests",
                   },
                   {
                     label: "In progress",
-                    value: tickets.filter((t) => t.status === "In Progress")
-                      .length,
+                    value: currentTickets.filter(
+                      (t) => t.status === "In Progress",
+                    ).length,
                     note: "Being handled by staff",
                   },
                   {
-                    label: "Resolved",
-                    value: tickets.filter((t) => t.status === "Resolved")
-                      .length,
-                    note: "All recorded requests",
+                    label: "Checkout due",
+                    value: bookings.filter(
+                      (booking) => new Date(booking.checkOutTime) <= new Date(),
+                    ).length,
+                    note: "Departure needs confirmation",
                   },
                 ].map((m, i) => (
                   <article className={styles.metric} key={m.label}>
                     <div>
                       <span>{m.label}</span>
                       <span className={styles.metricIcon}>
-                        <Icon name={i === 0 ? "Guest journey" : "Requests"} />
+                        <Icon name={i === 0 ? "Stays" : "Requests"} />
                       </span>
                     </div>
                     <strong>{updated ? m.value : "—"}</strong>
@@ -564,7 +666,8 @@ export default function Dashboard() {
                     </div>
                     <button
                       onClick={() => {
-                        setFilter("All");
+                        setFilter("Open");
+                        setRequestScope("Current");
                         setSearch("");
                         setView("Requests");
                       }}
@@ -596,65 +699,6 @@ export default function Dashboard() {
                   )}
                 </section>
               </div>
-              <div className={styles.grid}>
-                <section className={styles.panel}>
-                  <div className={styles.panelHead}>
-                    <div>
-                      <h2>Request status</h2>
-                      <p>Distribution of recorded tickets</p>
-                    </div>
-                  </div>
-                  <div className={styles.statusChart}>
-                    {["Pending", "In Progress", "Resolved", "Escalated"].map(
-                      (s) => {
-                        const n = tickets.filter((t) => t.status === s).length;
-                        return (
-                          <div key={s}>
-                            <span>{s}</span>
-                            <div className={styles.track}>
-                              <span
-                                style={{
-                                  width: `${tickets.length ? (n / tickets.length) * 100 : 0}%`,
-                                }}
-                              />
-                            </div>
-                            <strong>{n}</strong>
-                          </div>
-                        );
-                      },
-                    )}
-                  </div>
-                </section>
-                <section className={styles.panel}>
-                  <div className={styles.panelHead}>
-                    <div>
-                      <h2>Automation & insights</h2>
-                      <p>Built around your guest journey</p>
-                    </div>
-                    <span className={styles.badge}>Next phase</span>
-                  </div>
-                  <div className={styles.insight}>
-                    <Icon name="Guest journey" />
-                    <div>
-                      <h3>Welcome → pulse → checkout → review</h3>
-                      <p>
-                        Job execution and delivery history are being connected.
-                        No scheduled-message counts are shown yet.
-                      </p>
-                    </div>
-                  </div>
-                  <div className={styles.insight}>
-                    <Icon name="Overview" />
-                    <div>
-                      <h3>Response times and GM summaries</h3>
-                      <p>
-                        Available after staff action timestamps and measured
-                        activity are recorded.
-                      </p>
-                    </div>
-                  </div>
-                </section>
-              </div>
             </>
           )}
           {view === "Conversations" && (
@@ -662,13 +706,27 @@ export default function Dashboard() {
               api={API}
               revision={revision}
               tickets={tickets}
-              onTicket={choose}
+              initialBookingId={conversationTarget}
             />
           )}
           {view === "Requests" && (
             <section className={`${styles.panel} ${styles.inbox}`}>
               <div className={styles.list}>
                 <div className={styles.inboxTools}>
+                  <div className={styles.scopeTabs}>
+                    {["Current", "History"].map((scope) => (
+                      <button
+                        key={scope}
+                        aria-pressed={requestScope === scope}
+                        onClick={() => {
+                          setRequestScope(scope);
+                          setSelected("");
+                        }}
+                      >
+                        {scope}
+                      </button>
+                    ))}
+                  </div>
                   <label className={styles.searchLabel}>
                     Search requests
                     <input
@@ -683,6 +741,7 @@ export default function Dashboard() {
                     onChange={(e) => setFilter(e.target.value)}
                   >
                     {[
+                      "Open",
                       "All",
                       "Pending",
                       "In Progress",
@@ -754,26 +813,50 @@ export default function Dashboard() {
                         </div>
                       ))}
                     </div>
+                    <button
+                      onClick={() => {
+                        if (current.bookingId) {
+                          setConversationTarget(current.bookingId);
+                          setView("Conversations");
+                        }
+                      }}
+                      disabled={!current.bookingId}
+                    >
+                      Open conversation
+                    </button>
                     <p className={styles.panelNote}>
                       This is the saved ticket text. Full conversation history
                       and staff replies are available in Conversations.
                     </p>
                     <div className={styles.statusActions}>
                       <button
-                        disabled={saving || current.status === "In Progress"}
+                        disabled={
+                          saving ||
+                          requestScope === "History" ||
+                          current.status === "In Progress"
+                        }
                         className={styles.primary}
                         onClick={() => void changeStatus("In Progress")}
                       >
                         Start handling
                       </button>
                       <button
-                        disabled={saving || current.status === "Resolved"}
+                        disabled={
+                          saving ||
+                          requestScope === "History" ||
+                          current.status === "Resolved" ||
+                          current.category === "Front Desk"
+                        }
                         onClick={() => void changeStatus("Resolved")}
                       >
-                        Mark resolved
+                        Complete & notify
                       </button>
                       <button
-                        disabled={saving || current.status === "Escalated"}
+                        disabled={
+                          saving ||
+                          requestScope === "History" ||
+                          current.status === "Escalated"
+                        }
                         onClick={() => void changeStatus("Escalated")}
                       >
                         Escalate
@@ -790,7 +873,7 @@ export default function Dashboard() {
               </div>
             </section>
           )}
-          {view === "Guest journey" && (
+          {view === "Stays" && (
             <div className={styles.stays}>
               {checkoutRetry && (
                 <section className={styles.panel}>
@@ -812,36 +895,47 @@ export default function Dashboard() {
                 </section>
               )}
 
-              {bookings.map((booking) => (
-                <section className={styles.panel} key={booking._id}>
-                  <div className={styles.panelHead}>
-                    <div>
-                      <span className={styles.eyebrow}>
-                        ROOM {booking.roomNumber}
-                      </span>
-                      <h2>{booking.guestName}</h2>
-                      <p>Checkout {date(booking.checkOutTime)} · Lagos time</p>
-                      <span className={styles.tag}>
-                        {new Date(booking.checkOutTime) <= new Date()
-                          ? "Checkout due"
-                          : "In house"}
-                      </span>
+              <label className={styles.staySearch}>
+                Search room or guest
+                <input
+                  value={staySearch}
+                  onChange={(event) => setStaySearch(event.target.value)}
+                  placeholder="Room number or guest name"
+                />
+              </label>
+              {bookings
+                .filter((booking) =>
+                  `${booking.roomNumber} ${booking.guestName}`
+                    .toLowerCase()
+                    .includes(staySearch.toLowerCase()),
+                )
+                .map((booking) => (
+                  <section className={styles.panel} key={booking._id}>
+                    <div className={styles.panelHead}>
+                      <div>
+                        <h2>Room {booking.roomNumber}</h2>
+                        <p className={styles.guestName}>{booking.guestName}</p>
+                        <p>
+                          Checkout {date(booking.checkOutTime)} · Lagos time
+                        </p>
+                        <span className={styles.tag}>
+                          {new Date(booking.checkOutTime) <= new Date()
+                            ? "Checkout due"
+                            : "In house"}
+                        </span>
+                      </div>
+                      <button
+                        className={styles.primary}
+                        disabled={Boolean(checkoutBusy)}
+                        onClick={() => void confirmCheckout(booking)}
+                      >
+                        {checkoutBusy === booking._id
+                          ? "Confirming…"
+                          : "Confirm checkout"}
+                      </button>
                     </div>
-                    <button
-                      className={styles.primary}
-                      disabled={Boolean(checkoutBusy)}
-                      onClick={() => void confirmCheckout(booking)}
-                    >
-                      {checkoutBusy === booking._id
-                        ? "Confirming…"
-                        : "Confirm checkout"}
-                    </button>
-                  </div>
-                  <p className={styles.panelNote}>
-                    Confirm after departure. Conversation history is retained.
-                  </p>
-                </section>
-              ))}
+                  </section>
+                ))}
 
               {!bookings.length && (
                 <section className={styles.panel}>
@@ -888,15 +982,12 @@ export default function Dashboard() {
                 ✕
               </button>
             </div>
-            <p>
-              Record the stay once. The current backend sends the welcome and a
-              demo pulse check.
-            </p>
+            <p>Record the guest’s room and checkout time.</p>
             <form onSubmit={checkIn}>
               {[
+                { key: "roomNumber", label: "Room number", type: "text" },
                 { key: "guestName", label: "Guest name", type: "text" },
                 { key: "guestPhone", label: "Phone number", type: "tel" },
-                { key: "roomNumber", label: "Room number", type: "text" },
                 {
                   key: "checkOutTime",
                   label: "Checkout time (your device timezone)",
@@ -907,35 +998,46 @@ export default function Dashboard() {
                   label: "Linked Telegram chat ID (demo only)",
                   type: "text",
                 },
-              ].map((f) => (
-                <label key={f.key}>
-                  {f.label}
-                  <input
-                    type={f.type}
-                    required={f.key !== "telegramChatId"}
-                    value={form[f.key as keyof typeof form]}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setForm((current) => ({ ...current, [f.key]: value }));
+              ].map((f) => {
+                const field = (
+                  <label key={f.key}>
+                    {f.label}
+                    <input
+                      type={f.type}
+                      required={f.key !== "telegramChatId"}
+                      value={form[f.key as keyof typeof form]}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setForm((current) => ({ ...current, [f.key]: value }));
 
-                      if (f.key === "checkOutTime") {
-                        const checkout = new Date(value);
+                        if (f.key === "checkOutTime") {
+                          const checkout = new Date(value);
 
-                        if (
-                          Number.isFinite(checkout.getTime()) &&
-                          checkout > new Date()
-                        ) {
-                          setNotice((current) =>
-                            current === "Choose a checkout time in the future."
-                              ? ""
-                              : current,
-                          );
+                          if (
+                            Number.isFinite(checkout.getTime()) &&
+                            checkout > new Date()
+                          ) {
+                            setNotice((current) =>
+                              current ===
+                              "Choose a checkout time in the future."
+                                ? ""
+                                : current,
+                            );
+                          }
                         }
-                      }
-                    }}
-                  />
-                </label>
-              ))}
+                      }}
+                    />
+                  </label>
+                );
+                return f.key === "telegramChatId" ? (
+                  <details key={f.key} className={styles.demoConnection}>
+                    <summary>Demo connection</summary>
+                    {field}
+                  </details>
+                ) : (
+                  field
+                );
+              })}
               <p className={styles.panelNote}>
                 Telegram requires the guest to start the bot first. Use only one
                 active stay per chat. Leaving the chat ID empty records a stay

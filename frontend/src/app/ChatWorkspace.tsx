@@ -7,12 +7,14 @@ type Ticket = { _id: string; bookingId?: string | null; category: string; reques
 const clock = (value: string) => new Date(value).toLocaleTimeString('en-NG', { timeZone: 'Africa/Lagos', hour: '2-digit', minute: '2-digit' });
 const day = (value: string) => new Date(value).toLocaleDateString('en-GB', { timeZone: 'Africa/Lagos', day: 'numeric', month: 'short', year: 'numeric' });
 const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map(value => value[0]).join('').toUpperCase();
-export default function ChatWorkspace({ api, revision, tickets }: { api: string; revision: number; tickets: Ticket[]; onTicket: (id: string) => void }) {
+export default function ChatWorkspace({ api, revision, tickets, initialBookingId = "" }: { api: string; revision: number; tickets: Ticket[]; initialBookingId?: string }) {
   const [taskBusy, setTaskBusy] = useState('');
   const [taskNotice, setTaskNotice] = useState('');
   const [taskOverrides, setTaskOverrides] = useState<{ source: Ticket[]; values: Record<string, Ticket> }>({ source: tickets, values: {} });
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selected, setSelected] = useState('');
+  const [selected, setSelected] = useState(initialBookingId);
+  const [scope, setScope] = useState<'Current' | 'History'>('Current');
+  const [requestOpen, setRequestOpen] = useState(true);
   const [search, setSearch] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadedBooking, setLoadedBooking] = useState('');
@@ -45,17 +47,17 @@ export default function ChatWorkspace({ api, revision, tickets }: { api: string;
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`${api}/api/conversations?limit=${listLimit}`, { signal: controller.signal, cache: 'no-store' }).then(async response => {
+    fetch(`${api}/api/conversations?limit=${listLimit}`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]), cache: 'no-store' }).then(async response => {
       const data = await response.json();
       if (!response.ok || !data.success || !Array.isArray(data.conversations)) throw new Error(data.message || 'Could not load conversations.');
-      setConversations(data.conversations); setMoreConversations(data.hasMore); setListError('');
+      setConversations(data.conversations); if (initialBookingId && data.conversations.some((item: Conversation) => item._id === initialBookingId && !['ACTIVE', 'EXTENDED'].includes(item.stayStatus))) setScope('History'); setMoreConversations(data.hasMore); setListError('');
     }).catch(error => { if (!controller.signal.aborted) setListError(error.message); });
     return () => controller.abort();
-  }, [api, revision, listLimit, reload]);
+  }, [api, revision, listLimit, reload, initialBookingId]);
   useEffect(() => {
     if (!selected) return;
     const controller = new AbortController();
-    fetch(`${api}/api/conversations/${selected}/messages?limit=${messageLimit}`, { signal: controller.signal, cache: 'no-store' }).then(async response => {
+    fetch(`${api}/api/conversations/${selected}/messages?limit=${messageLimit}`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]), cache: 'no-store' }).then(async response => {
       const data = await response.json();
       if (!response.ok || !data.success || !Array.isArray(data.messages)) throw new Error(data.message || 'Could not load messages.');
       setMessages(data.messages); setLoadedBooking(selected); setMoreMessages(data.hasMore); setChatError('');
@@ -72,7 +74,7 @@ export default function ChatWorkspace({ api, revision, tickets }: { api: string;
   }, [messages, loadedBooking, selected]);
   function choose(id: string) {
     if (sending || uncertain) { setNotice('Finish checking your pending reply before switching guests.'); return; }
-    setSelected(id); setMessageLimit(100); setDraft(''); setNotice(''); setChatError(''); pending.current = null;
+    setRequestOpen(true); setSelected(id); setMessageLimit(100); setDraft(''); setNotice(''); setChatError(''); pending.current = null;
   }
   async function reply(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -113,6 +115,7 @@ export default function ChatWorkspace({ api, revision, tickets }: { api: string;
   }
 const visible = conversations.filter(item =>
   item.stayStatus !== 'CANCELLED' &&
+  (scope === 'Current' ? ['ACTIVE', 'EXTENDED'].includes(item.stayStatus) : !['ACTIVE', 'EXTENDED'].includes(item.stayStatus)) &&
   `${item.guestName} ${item.roomNumber}`
     .toLowerCase()
     .includes(search.toLowerCase())
@@ -120,35 +123,35 @@ const visible = conversations.filter(item =>
   const activeTickets = tickets.map(item => (taskOverrides.source === tickets ? taskOverrides.values[item._id] : null) || item).filter(item => item.bookingId === selected && item.status !== 'Resolved');
   return <section ref={workspace} className={`${styles.workspace} ${selected ? styles.open : ''}`} aria-label="Guest conversations">
     <div className={styles.list}>
-      <div className={styles.listHead}><h2>Conversations</h2><p>One thread per guest stay</p><input aria-label="Search conversations by guest or room" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search guest or room…" /></div>
+      <div className={styles.listHead}><h2>Chats</h2><div className={styles.scopeTabs}>{(["Current", "History"] as const).map(value => <button key={value} aria-pressed={scope === value} onClick={() => { if (sending || uncertain) return; setScope(value); choose(""); }}>{value}</button>)}</div><input aria-label="Search conversations by guest or room" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search guest or room…" /></div>
       {listError && <div role="alert" className={styles.notice}>{listError} <button onClick={() => setReload(value => value + 1)}>Retry</button></div>}
       <div className={styles.rows}>{visible.map(item => <button className={`${styles.row} ${selected === item._id ? styles.selected : ''}`} key={item._id} onClick={() => choose(item._id)} aria-pressed={selected === item._id}>
-        <span className={styles.avatar}>{initials(item.guestName)}</span><span className={styles.rowText}><strong>{item.guestName}</strong><span>Room {item.roomNumber} · {['ACTIVE', 'EXTENDED'].includes(item.stayStatus) ? 'Active stay' : item.stayStatus.toLowerCase()}</span><small>{item.latestMessage?.text || 'No saved messages yet'}</small></span><time dateTime={item.lastActivity} title={day(item.lastActivity)}>{day(item.lastActivity) === day(new Date().toISOString()) ? clock(item.lastActivity) : day(item.lastActivity)}</time>
+        <span className={styles.avatar}>{initials(item.guestName)}</span><span className={styles.rowText}><strong>Room {item.roomNumber}</strong><span>{item.guestName} · {['ACTIVE', 'EXTENDED'].includes(item.stayStatus) ? 'Active stay' : item.stayStatus.toLowerCase()}</span><small>{item.latestMessage?.text || 'No saved messages yet'}</small>{tickets.some(ticket => ticket.bookingId === item._id && ticket.status !== 'Resolved') && <small className={styles.attention}>Open requests · {tickets.filter(ticket => ticket.bookingId === item._id && ticket.status !== 'Resolved').length}</small>}</span><time dateTime={item.lastActivity} title={day(item.lastActivity)}>{day(item.lastActivity) === day(new Date().toISOString()) ? clock(item.lastActivity) : day(item.lastActivity)}</time>
       </button>)}{!visible.length && <p className={styles.empty}>No matching conversations.</p>}</div>
       {moreConversations && <button onClick={() => setListLimit(value => Math.min(500, value + 100))} disabled={listLimit >= 500}>{listLimit >= 500 ? 'Showing latest 500 stays' : 'Load more stays'}</button>}
     </div>
     <div className={styles.chat}>
       {current ? <>
-        <header className={styles.chatHead}><button className={styles.back} onClick={() => choose('')} aria-label="Back to conversations">←</button><span className={styles.avatar}>{initials(current.guestName)}</span><div><h2>{current.guestName}</h2><p>Room {current.roomNumber} · {['ACTIVE', 'EXTENDED'].includes(current.stayStatus) ? 'Active stay' : 'Historical stay'}</p></div><span className={styles.channel}>Guest chat</span></header>
+        <header className={styles.chatHead}><button className={styles.back} onClick={() => choose('')} aria-label="Back to conversations">←</button><span className={styles.avatar}>{initials(current.guestName)}</span><div><h2>Room {current.roomNumber} · {current.guestName}</h2><p>{['ACTIVE', 'EXTENDED'].includes(current.stayStatus) ? 'Active stay' : 'Historical stay'}</p></div>{activeTickets.length > 0 && <button onClick={() => setRequestOpen(value => !value)} aria-expanded={requestOpen}>Requests · {activeTickets.length}</button>}</header>
         <div className={styles.thread} ref={thread} role="log" aria-label={`Conversation with ${current.guestName}`}>
           {chatError && <div role="alert" className={styles.notice}>{chatError} <button onClick={() => setReload(value => value + 1)}>Retry</button></div>}
           {loadedBooking !== selected ? <p className={styles.empty}>Loading conversation…</p> : <>
             {moreMessages && <button className={styles.older} onClick={() => setMessageLimit(value => Math.min(500, value + 100))} disabled={messageLimit >= 500}>{messageLimit >= 500 ? 'Showing latest 500 messages' : 'Load older messages'}</button>}
             {!messages.length && <p className={styles.empty}>No saved messages for this stay yet.</p>}
-            {messages.map((message, index) => <Fragment key={message._id}>{(index === 0 || day(messages[index - 1].createdAt) !== day(message.createdAt)) && <div className={styles.date}><span>{day(message.createdAt) === day(new Date().toISOString()) ? 'Today' : day(message.createdAt)}</span></div>}<article className={`${styles.bubble} ${message.direction === 'OUTBOUND' ? styles.outbound : styles.inbound}`}><span className={styles.sender}>{message.direction === 'INBOUND' ? 'Guest' : message.sender === 'STAFF' ? 'Reception' : 'Hotel'}</span><p>{message.text}</p><div className={styles.messageMeta}><time dateTime={message.createdAt} title={`${day(message.createdAt)} · Lagos time`}>{clock(message.createdAt)}</time>{message.direction === 'OUTBOUND' && message.sender === 'STAFF' && <span>{message.deliveryState === 'SENT' ? 'Sent to Telegram' : message.deliveryState === 'PENDING' ? 'Pending send confirmation' : 'Delivery unconfirmed'}</span>}</div></article></Fragment>)}
+            {messages.map((message, index) => <Fragment key={message._id}>{(index === 0 || day(messages[index - 1].createdAt) !== day(message.createdAt)) && <div className={styles.date}><span>{day(message.createdAt) === day(new Date().toISOString()) ? 'Today' : day(message.createdAt)}</span></div>}<article className={`${styles.bubble} ${message.direction === 'OUTBOUND' ? styles.outbound : styles.inbound}`}><p>{message.text}</p><div className={styles.messageMeta}><time dateTime={message.createdAt} title={`${day(message.createdAt)} · Lagos time`}>{clock(message.createdAt)}</time>{message.direction === 'OUTBOUND' && message.sender === 'STAFF' && <span>{message.deliveryState === 'SENT' ? 'Sent to Telegram' : message.deliveryState === 'PENDING' ? 'Pending send confirmation' : 'Delivery unconfirmed'}</span>}</div></article></Fragment>)}
           </>}
         </div>
-        <details className={styles.requests}>
-          <summary>{activeTickets.length} open {activeTickets.length === 1 ? 'request' : 'requests'} for this stay</summary>
+        {current.canReply && activeTickets.length > 0 && requestOpen && <section className={styles.requests}>
+
           {taskNotice && <p role="status" className={styles.notice}>{taskNotice}</p>}
           <div>{activeTickets.map(ticket => <article className={styles.taskCard} key={ticket._id}>
             <strong>{ticket.category} · {ticket.status}</strong><p>{ticket.requestText}</p>
             {ticket.guestUpdates?.map(update => <p key={update.messageId}>Guest update · {day(update.createdAt)} {clock(update.createdAt)}: {update.text}</p>)}
-            {ticket.category === 'Front Desk' ? <p>Reception decision needed. Reply to the guest here; extension approval will use a separate booking action.</p> : <div className={styles.taskActions}><button disabled={Boolean(taskBusy)} onClick={() => void updateTicket(ticket, { status: 'Resolved' })}>{taskBusy === ticket._id ? 'Completing…' : 'Done · notify guest'}</button></div>}
+            <div className={styles.taskActions}><button disabled={Boolean(taskBusy) || ticket.status === 'In Progress'} onClick={() => void updateTicket(ticket, { status: 'In Progress' })}>{ticket.status === 'In Progress' ? 'In progress' : 'Start handling'}</button></div>{ticket.category === 'Front Desk' ? <p>Reception review · reply below</p> : <div className={styles.taskActions}><button disabled={Boolean(taskBusy)} onClick={() => void updateTicket(ticket, { status: 'Resolved' })}>{taskBusy === ticket._id ? 'Completing…' : 'Complete & notify'}</button></div>}
 
           </article>)}{!activeTickets.length && <p>No open requests for this stay.</p>}</div>
-        </details>
-        <div className={styles.composeArea}>{notice && <div className={styles.notice} role="status">{notice}</div>}{!current.canReply && <p className={styles.notice}>Replies require an active stay linked to Telegram. Historical conversations remain available to read.</p>}<form className={styles.composer} onSubmit={reply}><textarea aria-label={`Reply to ${current.guestName}`} placeholder={`Reply to ${current.guestName.split(' ')[0]}…`} value={draft} maxLength={3000} rows={2} disabled={sending || uncertain || !current.canReply} onChange={event => setDraft(event.target.value)} /><button type="submit" disabled={sending || !draft.trim() || (!current.canReply && !uncertain)} aria-label={uncertain ? 'Check pending reply status' : 'Send reply'}>{sending ? 'Sending…' : uncertain ? 'Check status' : 'Send ↗'}</button></form><small className={styles.timezone}>Times shown in Lagos · {draft.length}/3000</small></div>
+        </section>}
+        <div className={styles.composeArea}>{notice && <div className={styles.notice} role="status">{notice}</div>}{current.canReply || uncertain ? <form className={styles.composer} onSubmit={reply}><textarea aria-label={`Reply to ${current.guestName}`} placeholder={`Reply to ${current.guestName.split(' ')[0]}…`} value={draft} maxLength={3000} rows={1} disabled={sending || uncertain || !current.canReply} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && !sending && !uncertain) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /><button type="submit" disabled={sending || !draft.trim() || (!current.canReply && !uncertain)} aria-label={uncertain ? 'Check pending reply status' : 'Send reply'}>{sending ? 'Sending…' : uncertain ? 'Check status' : 'Send'}</button></form> : null}</div>
       </> : <div className={styles.welcome}><span className={styles.welcomeIcon}>✉</span><h2>Your guest conversations</h2><p>Select a guest to read their messages and reply.</p><small>Messages belong to a stay, even when a room is reused.</small></div>}
     </div>
   </section>;
