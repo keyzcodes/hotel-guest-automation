@@ -4,10 +4,13 @@ const TaskTicket = require("../models/TaskTicket");
 const hotel = require("../config/hotel");
 const { interpretGuestMessage, validateDecision } = require("./guestAiService");
 const { serviceFallback } = require("./guestFallbackService");
+
 const openStatuses = ["Pending", "In Progress", "Escalated"];
-async function recordAndReply(ctx, inbound, text) {
+async function recordAndReply(ctx, inbound, text, timing) {
+  // Time persistence and Telegram separately; keep uncertain-send behaviour unchanged.
+  const measure = (stage, operation) => timing ? timing.measure(stage, operation) : operation();
   // Save before sending; do not automatically retry uncertain external sends.
-  const outgoing = await Message.create({
+  const outgoing = await measure("reply_record_create", () => Message.create({
     bookingId: inbound.bookingId || null,
     channel: "TELEGRAM",
     chatId: inbound.chatId,
@@ -17,12 +20,12 @@ async function recordAndReply(ctx, inbound, text) {
     idempotencyKey: `AUTO:${inbound._id}`,
     processingStatus: "NOT_APPLICABLE",
     deliveryState: "PENDING",
-  });
+  }));
   try {
-    const sent = await ctx.reply(text);
+    const sent = await measure("telegram_send", () => ctx.reply(text));
     outgoing.providerMessageId = String(sent.message_id);
     outgoing.deliveryState = "SENT";
-    await outgoing.save();
+    await measure("reply_record_confirm", () => outgoing.save());
   } catch {
     await Message.updateOne(
       { _id: outgoing._id },
@@ -106,12 +109,18 @@ async function applyDecision(decision, inbound, booking, tickets) {
   };
 }
 async function processGuestMessage(ctx) {
+  // Load timing only for message processing, not decision-only tests.
+  const { createResponseTiming } = require("./responseTimingService");
+
   const chatId = String(ctx.chat.id),
     text = ctx.message.text;
+  // Monotonic timings contain no guest text, phone number, chat ID, or API key.
+  const timing = createResponseTiming();
+  const reply = (context, message, response) => recordAndReply(context, message, response, timing);
   let inbound, booking;
   try {
     try {
-      inbound = await Message.create({
+      inbound = await timing.measure("inbound_save", () => Message.create({
         channel: "TELEGRAM",
         chatId,
         direction: "INBOUND",
@@ -119,21 +128,22 @@ async function processGuestMessage(ctx) {
         providerMessageId: String(ctx.message.message_id),
         idempotencyKey: `TELEGRAM:${chatId}:${ctx.message.message_id}`,
         processingStatus: "RECEIVED",
-      });
+      }));
     } catch (error) {
-      if (error.code === 11000) return;
+      if (error.code === 11000) { timing.setOutcome("duplicate_ignored"); return; }
       throw error;
     }
-    const linked = await Booking.find({
+    const linked = await timing.measure("booking_lookup", () => Booking.find({
       telegramChatId: chatId,
       stayStatus: { $in: ["ACTIVE", "EXTENDED"] },
-    }).limit(2);
+    }).limit(2));
     if (linked.length !== 1) {
+      timing.setOutcome("unlinked_stay");
       await Message.updateOne(
         { _id: inbound._id },
         { $set: { processingStatus: "NEEDS_STAFF" } },
       );
-      await recordAndReply(
+      await reply(
         ctx,
         inbound,
         "Your message has been recorded, but this chat is not linked to one confirmed active stay. Please contact reception to link your stay.",
@@ -143,7 +153,7 @@ async function processGuestMessage(ctx) {
     booking = linked[0];
     inbound.bookingId = booking._id;
     inbound.processingStatus = "PROCESSING";
-    await inbound.save();
+    await timing.measure("booking_link_save", () => inbound.save());
 
     const replyTo = ctx.message.reply_to_message?.message_id;
 
@@ -151,6 +161,7 @@ async function processGuestMessage(ctx) {
       booking.extensionPromptMessageId &&
       replyTo === booking.extensionPromptMessageId
     ) {
+      timing.setOutcome("extension_reply");
       // Accept a clear, limited format; reception approves the request.
       const answer = text.trim();
       const match = answer.match(
@@ -198,7 +209,7 @@ async function processGuestMessage(ctx) {
         inbound.processingStatus = "PROCESSED";
         await inbound.save();
 
-        await recordAndReply(
+        await reply(
           ctx,
           inbound,
           "What checkout date and time would you prefer? Please reply to the extension question, for example: Tomorrow at 3 PM, Lagos time.",
@@ -252,14 +263,14 @@ async function processGuestMessage(ctx) {
       await inbound.save();
 
       // Keep the prompt ID so further replies use this same flow.
-      await recordAndReply(
+      await reply(
         ctx,
         inbound,
         "Thank you. We've received your preferred checkout time. We'll confirm availability shortly.",
       );
       return;
     }
-    const [history, tickets] = await Promise.all([
+    const [history, tickets] = await timing.measure("context_load", () => Promise.all([
       Message.find({
         bookingId: booking._id,
         _id: { $ne: inbound._id },
@@ -276,30 +287,32 @@ async function processGuestMessage(ctx) {
         .sort({ updatedAt: -1 })
         .limit(20)
         .lean(),
-    ]);
+    ]));
     if (text.length > 4000)
       throw new Error("Guest message exceeds AI processing limit.");
     let decision;
     try {
-      decision = await interpretGuestMessage({
+      decision = await timing.measure("ai_interpretation", () => interpretGuestMessage({
         text,
         hotel,
         booking,
         history: history.reverse(),
         tickets,
-      });
+      }));
     } catch (error) {
       decision = serviceFallback(text, tickets);
       if (!decision) throw error;
+      timing.setOutcome("local_fallback");
       console.warn("AI unavailable; local fallback used:", error.name);
     }
-    const outcome = await applyDecision(decision, inbound, booking, tickets);
+    const outcome = await timing.measure("decision_apply", () => applyDecision(decision, inbound, booking, tickets));
     inbound.processingStatus = outcome.needsStaff ? "NEEDS_STAFF" : "PROCESSED";
     inbound.aiAction = decision.action;
     inbound.ticketId = outcome.ticketId;
-    await inbound.save();
-    await recordAndReply(ctx, inbound, outcome.reply);
+    await timing.measure("processing_result_save", () => inbound.save());
+    await reply(ctx, inbound, outcome.reply);
   } catch (error) {
+    timing.setOutcome("staff_handoff");
     console.error(
       "Guest message processing failed:",
       error.name,
@@ -307,6 +320,7 @@ async function processGuestMessage(ctx) {
       error.stack,
     );
     if (!inbound) {
+      timing.setOutcome("inbound_save_failed");
       await ctx
         .reply(
           "We could not record your message. Please contact reception directly.",
@@ -394,13 +408,16 @@ async function processGuestMessage(ctx) {
         },
       },
     ).catch(() => {});
-    await recordAndReply(
+    await reply(
       ctx,
       inbound,
       handoffRecorded
         ? "Thank you. We’ve received your request and will assist you shortly."
         : "Please contact the front desk so we can assist you.",
     ).catch(() => {});
+  } finally {
+    // Report every exit, including duplicates, extensions, and failed processing.
+    timing.finish(inbound?._id);
   }
 }
 module.exports = { processGuestMessage, applyDecision };
