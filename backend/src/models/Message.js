@@ -69,7 +69,7 @@ messageSchema.add({
 });
 
 messageSchema.add({
-  aiAction: { type: String, enum: ['ANSWER', 'CLARIFY', 'CREATE_REQUEST', 'FOLLOW_UP', 'HANDOFF'], default: null },
+  aiAction: { type: String, enum: ['ANSWER', 'CLARIFY', 'CREATE_REQUEST', 'FOLLOW_UP', 'STATUS', 'HANDOFF'], default: null },
   ticketId: { type: mongoose.Schema.Types.ObjectId, ref: 'TaskTicket', default: null },
 });
 

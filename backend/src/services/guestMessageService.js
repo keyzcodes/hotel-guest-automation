@@ -68,6 +68,30 @@ async function applyDecision(decision, inbound, booking, tickets) {
   const checked = validateDecision(decision, tickets);
   if (["ANSWER", "CLARIFY"].includes(checked.action))
     return { reply: checked.reply, needsStaff: false, ticketId: null };
+  if (checked.action === "STATUS") {
+    // Read the current record; a status question must never append work or change state.
+    const ticket = await TaskTicket.findOne({
+      _id: checked.ticketId,
+      bookingId: booking._id,
+    }).select("_id category status").lean();
+    if (!ticket) return {
+      reply: "I couldn't find that request. Which request would you like us to check?",
+      needsStaff: false,
+      ticketId: null,
+    };
+    const department = ticket.category;
+    const replies = {
+      Pending: `Your ${department} request is awaiting staff confirmation. A completion time hasn't been confirmed yet.`,
+      "In Progress": `Your ${department} request is marked as in progress. A completion time hasn't been confirmed yet.`,
+      Escalated: `Your ${department} request is marked for further staff review. A completion time hasn't been confirmed yet.`,
+      Resolved: `Your ${department} request has been marked as completed. Please let us know if you still need help.`,
+    };
+    return {
+      reply: replies[ticket.status] || "There isn't a confirmed status available for that request yet.",
+      needsStaff: false,
+      ticketId: ticket._id,
+    };
+  }
   if (checked.action === "FOLLOW_UP") {
     const updated = await TaskTicket.findOneAndUpdate(
       {
@@ -267,7 +291,7 @@ async function processGuestMessage(ctx) {
       );
       return;
     }
-    const [history, tickets] = await timing.measure("context_load", () => Promise.all([
+    const [history, openTickets, completedTickets] = await timing.measure("context_load", () => Promise.all([
       Message.find({
         bookingId: booking._id,
         _id: { $ne: inbound._id },
@@ -284,7 +308,13 @@ async function processGuestMessage(ctx) {
         .sort({ updatedAt: -1 })
         .limit(20)
         .lean(),
+      // Keep recent completed work separate so it cannot displace open requests.
+      TaskTicket.find({ bookingId: booking._id, status: "Resolved" })
+        .sort({ updatedAt: -1, _id: -1 })
+        .limit(10)
+        .lean(),
     ]));
+    const tickets = [...openTickets, ...completedTickets];
     if (text.length > 4000)
       throw new Error("Guest message exceeds AI processing limit.");
     let decision;
@@ -297,7 +327,7 @@ async function processGuestMessage(ctx) {
         tickets,
       }));
     } catch (error) {
-      decision = serviceFallback(text, tickets);
+      decision = serviceFallback(text, openTickets);
       if (!decision) throw error;
       timing.setOutcome("local_fallback");
       console.warn("AI unavailable; local fallback used:", error.name);

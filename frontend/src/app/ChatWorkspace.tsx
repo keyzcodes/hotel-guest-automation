@@ -79,6 +79,7 @@ export default function ChatWorkspace({
   const [selected, setSelected] = useState(initialBookingId);
   const [scope, setScope] = useState<"Current" | "History">(initialScope);
   const [requestOpen, setRequestOpen] = useState(false);
+  const [selectionReady, setSelectionReady] = useState(false);
   const [search, setSearch] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadedBooking, setLoadedBooking] = useState("");
@@ -103,6 +104,31 @@ export default function ChatWorkspace({
   const readFlight = useRef(false);
   const lastScroll = useRef({ bookingId: "", messageId: "" });
   const current = conversations.find((item) => item._id === selected);
+  useEffect(() => {
+    // Per-tab storage keeps a refreshed chat open without storing message content.
+    const timer = window.setTimeout(() => {
+      if (!initialBookingId) {
+        try {
+          const saved = JSON.parse(sessionStorage.getItem(`hotel-chat:${api}`) || "null");
+          if (saved && (saved.scope === "Current" || saved.scope === "History")) {
+            setScope(saved.scope);
+            if (typeof saved.bookingId === "string" && /^[a-f\d]{24}$/i.test(saved.bookingId)) {
+              setSelected(saved.bookingId);
+            }
+          }
+        } catch { /* Invalid or unavailable storage must not block navigation. */ }
+      }
+      setSelectionReady(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [api, initialBookingId]);
+  useEffect(() => {
+    if (!selectionReady) return;
+    try {
+      sessionStorage.setItem(`hotel-chat:${api}`, JSON.stringify({ bookingId: selected, scope }));
+    } catch { /* Chat remains usable without browser storage. */ }
+  }, [api, selected, scope, selectionReady]);
+
   useEffect(() => {
     // Dismiss only confirmed success; keep errors and uncertain delivery visible.
     const success = ["Request completed. Confirmation sent to Telegram.", "Review closed."];
@@ -144,6 +170,7 @@ export default function ChatWorkspace({
   }, []);
 
   useEffect(() => {
+    if (!selectionReady) return;
     const controller = new AbortController();
     fetch(`${api}/api/conversations?scope=${scope}&limit=${listLimit}`, {
       signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]),
@@ -154,15 +181,16 @@ export default function ChatWorkspace({
         if (!response.ok || !data.success || !Array.isArray(data.conversations))
           throw new Error(data.message || "Could not load conversations.");
         setConversations(data.conversations);
-        if (
-          initialBookingId &&
-          data.conversations.some(
-            (item: Conversation) =>
-              item._id === initialBookingId &&
-              !["ACTIVE", "EXTENDED"].includes(item.stayStatus),
-          )
-        )
-          setScope("History");
+        // Validate the restored selection against saved stays, never by room number.
+        // Expand a limited list before deciding the selected stay is unavailable.
+        if (selected && !data.conversations.some((item: Conversation) => item._id === selected)) {
+          if (data.hasMore && listLimit < 500) {
+            setListLimit((value) => Math.min(500, value + 100));
+          } else {
+            setSelected("");
+            setNotice("That conversation is not in this list. Select a guest or check History.");
+          }
+        }
         setMoreConversations(data.hasMore);
         setListError("");
       })
@@ -170,9 +198,9 @@ export default function ChatWorkspace({
         if (!controller.signal.aborted) setListError(error.message);
       });
     return () => controller.abort();
-  }, [api, revision, listLimit, reload, initialBookingId, scope]);
+  }, [api, revision, listLimit, reload, selected, scope, selectionReady]);
   useEffect(() => {
-    if (!selected) return;
+    if (!selectionReady || !selected) return;
     const controller = new AbortController();
     fetch(
       `${api}/api/conversations/${selected}/messages?limit=${messageLimit}`,
@@ -197,7 +225,7 @@ export default function ChatWorkspace({
         if (!controller.signal.aborted) setChatError(error.message);
       });
     return () => controller.abort();
-  }, [api, selected, revision, messageLimit, reload]);
+  }, [api, selected, revision, messageLimit, reload, selectionReady]);
   useEffect(() => {
     const controller = new AbortController();
     const markRead = async () => {
@@ -432,6 +460,7 @@ export default function ChatWorkspace({
             placeholder="Search guest or room…"
           />
         </div>
+        {!current && notice && <p role="status" className={styles.notice}>{notice}</p>}
         {listError && (
           <div role="alert" className={styles.notice}>
             {listError}{" "}
