@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import ChatWorkspace from "./ChatWorkspace";
+import GuestFeedback from "./GuestFeedback";
 import styles from "./dashboard.module.css";
 
 type Ticket = {
@@ -619,6 +620,10 @@ export default function Dashboard() {
                   </article>
                 ))}
               </section>
+              <GuestFeedback api={API} revision={revision} onOpen={(id) => {
+                setConversationTarget(id);
+                setView("Conversations");
+              }} />
               <div className={styles.grid}>
                 <section className={styles.panel}>
                   <div className={styles.panelHead}>

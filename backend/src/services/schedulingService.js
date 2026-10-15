@@ -24,6 +24,7 @@ const scheduleCheckInJobs = async (
   {
     pulseDelayMs = 15 * MINUTE,
     checkoutReminderLeadMs = 30 * MINUTE,
+    reminderDelayMs, // Demo-only offset; normal reminders follow planned checkout.
   } = {}
 ) => {
   const checkIn = new Date(booking.checkInTime);
@@ -46,6 +47,7 @@ const scheduleCheckInJobs = async (
     throw new Error('Message timing must use positive millisecond values.');
   }
 
+  if (reminderDelayMs !== undefined && (!Number.isFinite(reminderDelayMs) || reminderDelayMs <= 0)) throw new Error('Invalid reminder offset.');
   const bookingId = booking._id.toString();
 
   await saveJob(
@@ -70,10 +72,13 @@ const scheduleCheckInJobs = async (
   const reminderAt = new Date(
     Math.max(
       checkIn.getTime(),
-      checkOut.getTime() - checkoutReminderLeadMs
+      reminderDelayMs === undefined
+        ? checkOut.getTime() - checkoutReminderLeadMs
+        : checkIn.getTime() + reminderDelayMs
     )
   );
 
+  if (reminderAt >= checkOut) return;
   await saveJob(
     booking._id,
     'PRE_CHECKOUT',

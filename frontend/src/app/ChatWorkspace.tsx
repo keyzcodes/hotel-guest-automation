@@ -12,6 +12,7 @@ type Message = {
   staffReadAt?: string | null;
 };
 type Conversation = {
+  guestRating?: number | null;
   _id: string;
   guestName: string;
   roomNumber: string;
@@ -535,6 +536,7 @@ export default function ChatWorkspace({
                   {["ACTIVE", "EXTENDED"].includes(current.stayStatus)
                     ? "Active stay"
                     : "Historical stay"}
+                  {current.guestRating != null && ` · Stay rating ${current.guestRating}/5`}
                   {Boolean(current.needsReplyCount) && (
                     <span className={attentionStyles.headerFlag}>
                       {" "}

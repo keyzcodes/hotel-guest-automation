@@ -65,7 +65,7 @@ const checkInGuest = async (req, res) => {
     let automationScheduled = true;
     try {
       const timings = process.env.JOB_DEMO_MODE === 'true'
-        ? { pulseDelayMs: 15000, checkoutReminderLeadMs: 30000 }
+        ? { pulseDelayMs: 60000, checkoutReminderLeadMs: 60000, reminderDelayMs: 120000 }
         : {};
       await scheduleCheckInJobs(newBooking, timings);
     } catch (error) {

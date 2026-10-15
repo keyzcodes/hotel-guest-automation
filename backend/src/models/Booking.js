@@ -52,6 +52,7 @@ const bookingSchema = new mongoose.Schema(
       type: Number,
       default: null,
     },
+    guestRatedAt: { type: Date, default: null },
     guestRating: {
       type: Number,
       min: 1,

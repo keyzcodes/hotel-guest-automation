@@ -114,20 +114,23 @@ async function executeJob(job, dependencies = {}) {
           booking.telegramChatId,
           booking.guestName,
           booking.roomNumber,
+          booking,
         );
       else if (job.type === "PULSE_CHECK")
         sent = await telegram.sendSatisfactionCheck(
           booking.telegramChatId,
           booking.guestName,
           booking.roomNumber,
+          booking,
         );
       else if (job.type === "PRE_CHECKOUT")
         sent = await telegram.sendPreCheckoutPrompt(
           booking.telegramChatId,
           booking.roomNumber,
+          booking,
         );
       else if (job.type === "REVIEW_REQUEST")
-        sent = await telegram.sendReviewPrompt(booking.telegramChatId);
+        sent = await telegram.sendReviewPrompt(booking.telegramChatId, booking);
       else throw Error("Unsupported job type");
       return sent;
     };

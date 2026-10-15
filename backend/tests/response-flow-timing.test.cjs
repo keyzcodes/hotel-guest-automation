@@ -32,7 +32,7 @@ test('AI failure still uses existing fallback and retains failed AI timing', asy
   assert.equal(f.rows[0].outcome, 'local_fallback'); assert.equal(f.rows[0].stages.find(s => s.stage === 'ai_interpretation').result, 'error');
 });
 test('duplicate and unlinked exits are reported without introducing AI calls', async () => {
-  for (const options of [{ duplicate: true }, { linked: false }]) { const f = fixture(options); await f.run(); assert.equal(f.rows.length, 1); assert.equal(f.rows[0].stages.some(s => s.stage === 'ai_interpretation'), false); }
+  for (const options of [{ duplicate: true }, { linked: false }]) { const f = fixture(options); await f.run(); assert.equal(f.rows.length, 1); assert.equal(f.rows[0].stages.some(s => s.stage === 'ai_interpretation'), false); assert.equal(f.sends(), 0); }
 });
 test('uncertain Telegram send is still not retried by instrumentation', async () => {
   const f = fixture({ sendFails: true }); await f.run(); assert.equal(f.sends(), 1); assert.equal(f.rows[0].stages.find(s => s.stage === 'telegram_send').result, 'error');

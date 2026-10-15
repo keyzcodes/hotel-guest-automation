@@ -13,13 +13,13 @@ const bot = new Bot(token);
 /**
  * 1. Send Check-In Welcome Message
  */
-const sendWelcomeMessage = async (chatId, guestName, roomNumber) => {
+const sendWelcomeMessage = async (chatId, guestName, roomNumber, booking) => {
   const hotelName = hotel.name;
   const hotelInfo = hotel.welcomeInfo;
 
   const text = [
     `Welcome to ${hotelName}, ${guestName}!`,
-    `Your check-in for Room ${roomNumber} is confirmed.`,
+    `It’s a pleasure to have you with us.\n\nRoom ${roomNumber}${booking?.checkOutTime ? `\nCheckout: ${new Date(booking.checkOutTime).toLocaleString('en-GB', { timeZone: 'Africa/Lagos', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · Lagos time` : ''}`,
     hotelInfo,
     "Message us here for assistance, housekeeping, or room service.",
   ]
@@ -33,11 +33,11 @@ const sendWelcomeMessage = async (chatId, guestName, roomNumber) => {
  * 2. Send 15-Minute Satisfaction Pulse Check (Interactive Inline Buttons)
  */
 const sendSatisfactionCheck = async (chatId, guestName, roomNumber) => {
-  const text = `👋 Hi ${guestName}, we hope you are settling into Room ${roomNumber} smoothly!\n\nIs everything up to your expectations so far?`;
+  const text = `Settling in comfortably, ${guestName}?\n\nWe hope everything in Room ${roomNumber} is just right. How is your stay so far?`;
 
   const keyboard = new InlineKeyboard()
-    .text("👍 Everything is Great", `PULSE_GOOD_${roomNumber}`)
-    .text("🛠️ I Need Assistance", `PULSE_ISSUE_${roomNumber}`);
+    .text("Everything’s good", `PULSE_GOOD_${roomNumber}`)
+    .text("I need help", `PULSE_ISSUE_${roomNumber}`);
 
   return await bot.api.sendMessage(chatId, text, { reply_markup: keyboard });
 };
@@ -45,11 +45,19 @@ const sendSatisfactionCheck = async (chatId, guestName, roomNumber) => {
 /**
  * 3. Send 30-Minute Pre-Checkout Prompt
  */
-const sendPreCheckoutPrompt = async (chatId, roomNumber) => {
-  const text = `⏰ *Upcoming Check-Out Alert*\n\nYour check-out for Room ${roomNumber} is scheduled in 30 minutes.\nWould you like to extend your stay or prepare for check-out?`;
+const sendPreCheckoutPrompt = async (chatId, roomNumber, booking) => {
+  const checkout = booking?.checkOutTime
+    ? new Date(booking.checkOutTime).toLocaleString('en-GB', { timeZone: 'Africa/Lagos', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : null;
+  const minutesLeft = booking?.checkOutTime ? Math.ceil((new Date(booking.checkOutTime).getTime() - Date.now()) / 60000) : null;
+  // Normal scheduling runs at the 30-minute lead. Demo offsets must not make a
+  // false 30-minute claim when the booked checkout is tomorrow.
+  const lead = minutesLeft !== null && minutesLeft > 0 && minutesLeft <= 30
+    ? `Your checkout is in about ${minutesLeft} ${minutesLeft === 1 ? 'minute' : 'minutes'}.\n\n` : '';
+  const text = `A quick checkout reminder\n\n${lead}Your checkout for Room ${roomNumber}${checkout ? ` is ${checkout} · Lagos time` : ' is approaching'}.\n\nNeed a little more time? You can request an extension below.`;
 
   const keyboard = new InlineKeyboard()
-    .text("✅ Check-Out Now", `CHECKOUT_NOW_${roomNumber}`)
+    .text("Ready to leave", `CHECKOUT_NOW_${roomNumber}`)
     .text("Request extension", `EXTEND_STAY_${roomNumber}`);
 
   return await bot.api.sendMessage(chatId, text, {
@@ -61,24 +69,24 @@ const sendPreCheckoutPrompt = async (chatId, roomNumber) => {
 /**
  * 4. Send Post-Checkout Rating & Google Review Shield
  */
-const sendReviewPrompt = async (chatId) => {
+const sendReviewPrompt = async (chatId, booking) => {
+  if (!booking?._id) throw new Error("Review invitation requires a stay ID.");
   const googleReviewUrl = hotel.googleReviewUrl;
   const text = [
-    "Thank you for staying with us!",
-    "How would you rate your overall experience?",
-    googleReviewUrl
-      ? `You are also welcome to share an honest Google review:\n${googleReviewUrl}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-
-  const keyboard = new InlineKeyboard()
-    .text("1 star", "RATING_1")
-    .text("2 stars", "RATING_2")
-    .text("3 stars", "RATING_3")
-    .text("4 stars", "RATING_4")
-    .text("5 stars", "RATING_5");
+    `Thank you for staying at ${hotel.name}, ${booking.guestName}.`,
+    'We’d love to hear about your stay. Your honest review helps future guests choose with confidence and helps us improve.',
+    'How would you rate your stay?',
+  ].join('\n\n');
+  const keyboard = new InlineKeyboard();
+  // The public review invitation is available regardless of the internal rating.
+  if (googleReviewUrl) {
+    const url = new URL(googleReviewUrl);
+    if (url.protocol !== 'https:') throw new Error('Review link must use HTTPS.');
+    keyboard.url('Leave a Google review ↗', googleReviewUrl).row();
+  }
+  for (let rating = 1; rating <= 5; rating++) {
+    keyboard.text(`${rating} ★`, `RATING_${booking._id}_${rating}`);
+  }
 
   return await bot.api.sendMessage(chatId, text, {
     reply_markup: keyboard,
@@ -90,17 +98,33 @@ const sendReviewPrompt = async (chatId) => {
  */
 bot.on("callback_query:data", async (ctx) => {
   const data = ctx.callbackQuery.data;
-  await ctx.answerCallbackQuery(); // Stops loading spinner on mobile
+  // Acknowledge the click promptly. Ignore expired clicks without running actions.
+  try {
+    await ctx.answerCallbackQuery();
+  } catch (error) {
+    const description = error.description || "";
+    if (error.error_code === 400 && /query is too old|query ID is invalid|response timeout expired/i.test(description)) {
+      console.warn("Expired Telegram button click skipped.");
+      return;
+    }
+    throw error;
+  }
 
+  if (data.startsWith('RATING_')) {
+    const result = await require('./guestFeedbackService').saveGuestRating(ctx);
+    if (result.reply) await ctx.reply(result.reply);
+    return;
+  }
+  await require('./stayCallbackService').runStayCallback(ctx, async (ctx) => {
   if (data.startsWith("PULSE_GOOD")) {
     await ctx.reply("😊 We are thrilled to hear that! Enjoy your stay.");
   } else if (data.startsWith("PULSE_ISSUE")) {
     await ctx.reply(
-      "🚨 We apologize! Our front desk has been alerted and will attend to your room shortly. What issue are you experiencing?",
+      "We’re sorry something isn’t quite right. Please tell us what needs attention.",
     );
   } else if (data.startsWith("CHECKOUT_NOW")) {
     await ctx.reply(
-      "👍 Thank you! Please drop your keycard at the front desk when leaving.",
+      "Thank you. Please visit reception to complete checkout and return your keycard.",
     );
   } else if (data.startsWith("EXTEND_STAY_")) {
     const Booking = require("../models/Booking");
@@ -130,11 +154,8 @@ bot.on("callback_query:data", async (ctx) => {
       },
       { $set: { extensionPromptMessageId: prompt.message_id } },
     );
-  } else if (/^RATING_[1-5]$/.test(data)) {
-    await ctx.reply(
-      "Thank you for your feedback. You can also tell us here what went well or what we could improve.",
-    );
   }
+  });
 });
 
 /**

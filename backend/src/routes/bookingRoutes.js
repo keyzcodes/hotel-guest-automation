@@ -9,6 +9,7 @@ const {
 
 router.post('/check-in', checkInGuest);
 router.get('/active', getActiveBookings);
+router.get('/feedback', require('../services/guestFeedbackService').getGuestFeedback);
 router.post('/:id/checkout', confirmCheckout);
 
 module.exports = router;

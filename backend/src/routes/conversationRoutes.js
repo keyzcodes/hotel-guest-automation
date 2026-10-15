@@ -37,7 +37,7 @@ router.get('/', async (req, res) => {
         { $ne: ['$telegramChatId', ''] },
       ] }, lastActivity: { $ifNull: [{ $arrayElemAt: ['$latest.createdAt', 0] }, '$createdAt'] } } },
       { $sort: scope === 'Current' ? { needsReplyCount: -1, unreadCount: -1, lastActivity: -1, _id: -1 } : { lastActivity: -1, _id: -1 } }, { $limit: limit + 1 },
-      { $project: { guestName: 1, roomNumber: 1, stayStatus: 1, checkInTime: 1, checkOutTime: 1, unreadCount: 1, needsReplyCount: 1, latestMessage: 1, canReply: 1, lastActivity: 1 } },
+      { $project: { guestRating: 1, guestRatedAt: 1, guestName: 1, roomNumber: 1, stayStatus: 1, checkInTime: 1, checkOutTime: 1, unreadCount: 1, needsReplyCount: 1, latestMessage: 1, canReply: 1, lastActivity: 1 } },
     ]);
     res.json({ success: true, conversations: conversations.slice(0, limit), hasMore: conversations.length > limit });
   } catch (error) {

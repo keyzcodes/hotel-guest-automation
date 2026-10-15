@@ -143,11 +143,8 @@ async function processGuestMessage(ctx) {
         { _id: inbound._id },
         { $set: { processingStatus: "NEEDS_STAFF" } },
       );
-      await reply(
-        ctx,
-        inbound,
-        "Your message has been recorded, but this chat is not linked to one confirmed active stay. Please contact reception to link your stay.",
-      );
+      // No active stay: keep this message unassigned and do not start AI,
+      // service requests or automatic guest replies. Never reopen a past stay.
       return;
     }
     booking = linked[0];
