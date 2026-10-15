@@ -78,7 +78,7 @@ export default function ChatWorkspace({
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selected, setSelected] = useState(initialBookingId);
   const [scope, setScope] = useState<"Current" | "History">(initialScope);
-  const [requestOpen, setRequestOpen] = useState(true);
+  const [requestOpen, setRequestOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadedBooking, setLoadedBooking] = useState("");
@@ -278,7 +278,8 @@ export default function ChatWorkspace({
       setNotice("Finish checking your pending reply before switching guests.");
       return;
     }
-    setRequestOpen(true);
+    // Keep messages readable on phones; the request count remains in the header.
+    setRequestOpen(window.matchMedia("(min-width: 800px)").matches);
     setSelected(id);
     setMessageLimit(100);
     setDraft("");
@@ -402,7 +403,7 @@ export default function ChatWorkspace({
   return (
     <section
       ref={workspace}
-      className={`${styles.workspace} ${selected ? styles.open : ""}`}
+      className={`${styles.workspace} ${selected && current ? styles.open : ""}`}
       aria-label="Guest conversations"
     >
       <div className={styles.list}>

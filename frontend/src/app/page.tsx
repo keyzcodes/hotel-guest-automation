@@ -221,11 +221,10 @@ export default function Dashboard() {
     };
   }, [refresh]);
   useEffect(() => {
-    const stored = localStorage.getItem("hotel-theme");
-    const initial = stored
-      ? stored === "dark"
-      : window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const timer = window.setTimeout(() => setDark(initial), 0);
+    // The head script has already applied the theme before the first paint.
+    const timer = window.setTimeout(() => {
+      setDark(document.documentElement.dataset.theme === "dark");
+    }, 0);
     return () => window.clearTimeout(timer);
   }, []);
   useEffect(() => {
@@ -264,6 +263,10 @@ export default function Dashboard() {
       }
       try {
         setShowForm(sessionStorage.getItem("hotel-checkin-open") === "true");
+        const savedView = sessionStorage.getItem("hotel-workspace-view");
+        if (["Overview", "Conversations", "Requests", "Stays"].includes(savedView || "")) {
+          setView(savedView as View);
+        }
       } catch {
         // Storage may be unavailable.
       }
@@ -295,9 +298,17 @@ export default function Dashboard() {
       /* Storage can be unavailable on shared browsers. */
     }
   }, [form, draftReady]);
+  useEffect(() => {
+    if (!draftReady) return;
+    // Restore first, then persist: never overwrite the saved tab during hydration.
+    try { sessionStorage.setItem("hotel-workspace-view", view); } catch { /* Optional storage. */ }
+  }, [view, draftReady]);
   const toggleTheme = () => {
-    setDark(!dark);
-    localStorage.setItem("hotel-theme", !dark ? "dark" : "light");
+    const next = !dark;
+    document.documentElement.dataset.theme = next ? "dark" : "light";
+    document.documentElement.style.colorScheme = next ? "dark" : "light";
+    setDark(next);
+    try { localStorage.setItem("hotel-theme", next ? "dark" : "light"); } catch { /* Theme still works without storage. */ }
   };
   const currentStayIds = new Set(bookings.map((booking) => booking._id));
   const currentTickets = tickets.filter(
@@ -436,8 +447,9 @@ export default function Dashboard() {
         throw new Error(
           "Check-in could not finish. Refresh active stays before retrying: a booking may already have been saved.",
         );
-      setConversationTarget(data.booking._id);
-      setView("Conversations");
+      // Stay on a navigable screen while the new booking and chat records refresh.
+      setConversationTarget("");
+      setView("Stays");
       setShowForm(false);
       setNotice(
         data.automationScheduled
@@ -479,7 +491,7 @@ export default function Dashboard() {
     </button>
   ));
   return (
-    <div className={styles.app} data-theme={dark ? "dark" : "light"}>
+    <div className={styles.app}>
       <aside className={styles.sidebar}>
         <div className={styles.brand}>
           <div className={styles.logo}>W</div>
@@ -490,9 +502,9 @@ export default function Dashboard() {
         </div>
         <nav aria-label="Main navigation">{nav}</nav>
         <div className={styles.sideFoot}>
-          <span className={styles.badge}>Demo workspace</span>
+          <span className={styles.badge}>Guest operations</span>
           <p>One place for every guest request.</p>
-          <small>Standalone · Telegram testing</small>
+          <small>Reception · Guest services</small>
         </div>
       </aside>
       <div className={styles.body}>
@@ -518,7 +530,7 @@ export default function Dashboard() {
             >
               <Icon name={dark ? "sun" : "moon"} />
             </button>
-            <div className={styles.avatar} aria-label="Demo staff">
+            <div className={styles.avatar} aria-label="Hotel workspace">
               WN
             </div>
           </div>
@@ -527,7 +539,7 @@ export default function Dashboard() {
           <div className={styles.titleRow}>
             <div>
               <span className={styles.eyebrow}>
-                THE WILLOWS NEST HOTEL · DEMO
+                THE WILLOWS NEST HOTEL
               </span>
               <h1>
                 {view === "Conversations"
@@ -562,7 +574,7 @@ export default function Dashboard() {
             <span>
               {updated
                 ? `Updated ${updated} · ${live ? "live updates" : "live reconnecting; periodic refresh active"}`
-                : "Connecting to your saved records…"}
+                : "Connecting to hotel records…"}
             </span>
             <button onClick={() => void refresh()} disabled={busy}>
               {busy ? "Refreshing…" : "Refresh now"}
@@ -957,8 +969,7 @@ export default function Dashboard() {
             </div>
           )}
           <footer className={styles.footer}>
-            Standalone guest service · Demo hotel details · Counts from saved
-            records
+            Guest services · The Willows Nest Hotel
           </footer>
         </main>
       </div>
@@ -1004,7 +1015,7 @@ export default function Dashboard() {
                 },
                 {
                   key: "telegramChatId",
-                  label: "Linked Telegram chat ID (demo only)",
+                  label: "Telegram chat ID (optional)",
                   type: "text",
                 },
               ].map((f) => {
@@ -1040,7 +1051,7 @@ export default function Dashboard() {
                 );
                 return f.key === "telegramChatId" ? (
                   <details key={f.key} className={styles.demoConnection}>
-                    <summary>Demo connection</summary>
+                    <summary>Guest messaging</summary>
                     {field}
                   </details>
                 ) : (

@@ -11,3 +11,20 @@
 :global([data-theme=dark]) .thread{background:#0b141a}:global([data-theme=dark]) .inbound{background:#202c33}:global([data-theme=dark]) .outbound{background:#005c4b}
 @media(min-width:800px){.workspace{height:clamp(520px,calc(100dvh - 190px),900px);grid-template-columns:290px minmax(0,1fr)}.thread{padding:18px 28px}.chatHead{padding:10px 18px}.bubble{max-width:78%}}
 @media(max-width:799px){.chatHead h2{font-size:15px}.chatHead button{font-size:12px}.requests>div{max-height:150px}.composer textarea{font-size:16px}}
+
+/* Mobile: fit one conversation to the visual viewport, including the keyboard. */
+@media(max-width:799px){
+  .open .chat{width:100%;max-width:100vw;overflow:hidden;min-height:0}
+  .chatHead{gap:8px;padding:10px 12px;min-height:64px}
+  .chatHead>div{min-width:0}.chatHead h2{font-size:15px;line-height:1.3}
+  .chatHead p{font-size:11px;line-height:1.35}.chatHead .avatar{width:32px;height:32px;font-size:11px}
+  .workspace .back{min-width:36px;padding:5px;flex-shrink:0}
+  .chatHead>button:last-child{flex-shrink:0;max-width:104px;padding:8px;font-size:11px}
+  .thread{padding:10px 12px;gap:5px;min-height:80px}
+  .bubble{max-width:90%;padding:6px 9px}.bubble p{font-size:14px;line-height:1.4!important}
+  .requests{min-height:0;max-height:28%;overflow:auto;padding:8px 12px}
+  .requests>div{max-height:none}.taskCard{padding:8px}.taskCard p{font-size:12px}
+  .composeArea{padding:8px 10px max(8px,env(safe-area-inset-bottom))}
+  .composer textarea{font-size:16px;min-width:0}.workspace .composer button{padding:10px 12px;flex-shrink:0}
+  .notice{padding:6px;font-size:11px}
+}
