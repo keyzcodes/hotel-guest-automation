@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch as fetch } from "./apiClient";
 import { Fragment, useEffect, useRef, useState } from "react";
 import styles from "./chat.module.css";
 import attentionStyles from "./attention.module.css";

@@ -12,8 +12,15 @@ dotenv.config();
 const app = express();
 const httpServer = require("http").createServer(app);
 require("./src/services/realtimeService").startRealtime(httpServer);
-app.use(cors());
-app.use(express.json());
+const staffAuth = require("./src/services/staffAuthService");
+// Only trust a hosting proxy when configured for that deployment.
+if (process.env.TRUST_PROXY === "1") app.set("trust proxy", 1);
+app.use(cors({ origin: staffAuth.allowedOrigins(), credentials: true }));
+app.use(express.json({ limit: "32kb" }));
+app.use("/api", staffAuth.requireOrigin);
+app.use("/api/auth", require("./src/routes/staffAuthRoutes"));
+// Protect every current and future operations API by default.
+app.use("/api", staffAuth.requireStaff);
 
 // Import Routes
 const bookingRoutes = require("./src/routes/bookingRoutes");
@@ -35,8 +42,12 @@ const MONGO_URI = process.env.MONGO_URI;
 
 mongoose
   .connect(MONGO_URI)
-  .then(() => {
+  .then(async () => {
     console.log("✅ Connected to MongoDB Atlas");
+    await Promise.all([
+      require("./src/models/StaffSession").init(),
+      require("./src/models/StaffLoginAttempt").init(),
+    ]);
     httpServer.listen(PORT, () => {
       require("./src/services/telegramService").startTelegramBot();
       require("./src/services/jobWorker")

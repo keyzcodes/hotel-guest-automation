@@ -1,9 +1,11 @@
 "use client";
+import { apiFetch as fetch } from "./apiClient";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import ChatWorkspace from "./ChatWorkspace";
 import GuestFeedback from "./GuestFeedback";
+import { useStaffAccess } from "./StaffAccess";
 import styles from "./dashboard.module.css";
 
 type Ticket = {
@@ -29,9 +31,7 @@ type Booking = {
   telegramChatId?: string | null;
 };
 type View = "Overview" | "Conversations" | "Requests" | "Stays";
-const API = (
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
-).replace(/\/$/, "");
+const API = "";
 const departments = [
   "Housekeeping",
   "Maintenance",
@@ -54,6 +54,7 @@ function Icon({ name }: { name: string }) {
     Requests: "M3 4h18v14H8l-5 3z M7 8h10 M7 12h7",
     Stays: "M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6",
     sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M12 2v2 M12 20v2 M2 12h2 M20 12h2 M5 5l1 1 M18 18l1 1 M5 19l1-1 M18 6l1-1",
+    logout: "M9 5H4v14h5 M10 12h11 M17 8l4 4-4 4",
     moon: "M20 15A9 9 0 0 1 9 4a9 9 0 1 0 11 11",
     arrow: "M5 12h14 M14 7l5 5-5 5",
   };
@@ -74,6 +75,7 @@ function Icon({ name }: { name: string }) {
   );
 }
 export default function Dashboard() {
+  const { logout, signingOut } = useStaffAccess();
   const refreshFlight = useRef<Promise<void> | null>(null);
   const [draftReady, setDraftReady] = useState(false);
   const [requestScope, setRequestScope] = useState("Current");
@@ -167,7 +169,12 @@ export default function Dashboard() {
   }, []);
   useEffect(() => {
     const controller = new AbortController();
-    const socket = io(API, { autoConnect: false });
+    const socket = io({
+      autoConnect: false,
+      transports: ["polling"],
+      upgrade: false,
+      withCredentials: true,
+    });
     let timer: number | undefined;
     let running = false;
     let requested = false;
@@ -264,7 +271,11 @@ export default function Dashboard() {
       try {
         setShowForm(sessionStorage.getItem("hotel-checkin-open") === "true");
         const savedView = sessionStorage.getItem("hotel-workspace-view");
-        if (["Overview", "Conversations", "Requests", "Stays"].includes(savedView || "")) {
+        if (
+          ["Overview", "Conversations", "Requests", "Stays"].includes(
+            savedView || "",
+          )
+        ) {
           setView(savedView as View);
         }
       } catch {
@@ -301,14 +312,22 @@ export default function Dashboard() {
   useEffect(() => {
     if (!draftReady) return;
     // Restore first, then persist: never overwrite the saved tab during hydration.
-    try { sessionStorage.setItem("hotel-workspace-view", view); } catch { /* Optional storage. */ }
+    try {
+      sessionStorage.setItem("hotel-workspace-view", view);
+    } catch {
+      /* Optional storage. */
+    }
   }, [view, draftReady]);
   const toggleTheme = () => {
     const next = !dark;
     document.documentElement.dataset.theme = next ? "dark" : "light";
     document.documentElement.style.colorScheme = next ? "dark" : "light";
     setDark(next);
-    try { localStorage.setItem("hotel-theme", next ? "dark" : "light"); } catch { /* Theme still works without storage. */ }
+    try {
+      localStorage.setItem("hotel-theme", next ? "dark" : "light");
+    } catch {
+      /* Theme still works without storage. */
+    }
   };
   const currentStayIds = new Set(bookings.map((booking) => booking._id));
   const currentTickets = tickets.filter(
@@ -341,14 +360,19 @@ export default function Dashboard() {
     setNotice("");
     try {
       // Department work can still use In Progress; review closure has no guest send.
-      const review = current.requiresReceptionReview || ['Front Desk', 'General Inquiry'].includes(current.category);
-      const closeReview = review && status === 'Resolved';
-      const response = await fetch(`${API}/api/tasks/${current._id}${closeReview ? '/close-review' : ''}`, {
-        method: closeReview ? "POST" : "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(closeReview ? {} : { status }),
-        signal: AbortSignal.timeout(30000),
-      });
+      const review =
+        current.requiresReceptionReview ||
+        ["Front Desk", "General Inquiry"].includes(current.category);
+      const closeReview = review && status === "Resolved";
+      const response = await fetch(
+        `${API}/api/tasks/${current._id}${closeReview ? "/close-review" : ""}`,
+        {
+          method: closeReview ? "POST" : "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(closeReview ? {} : { status }),
+          signal: AbortSignal.timeout(30000),
+        },
+      );
       const data = await response.json();
       if (!response.ok || !data.success)
         throw new Error(data.message || "Could not save the status.");
@@ -530,6 +554,22 @@ export default function Dashboard() {
             >
               <Icon name={dark ? "sun" : "moon"} />
             </button>
+            <button
+              className={styles.iconButton}
+              disabled={signingOut}
+              onClick={() => {
+                // Prevent accidental sign-out, especially on mobile.
+                if (window.confirm("Sign out of the hotel workspace?")) {
+                  void logout();
+                }
+              }}
+              aria-label="Sign out"
+            >
+              <Icon name="logout" />
+              <span className={styles.signOutLabel}>
+                {signingOut ? "Signing out…" : "Sign out"}
+              </span>
+            </button>
             <div className={styles.avatar} aria-label="Hotel workspace">
               WN
             </div>
@@ -538,9 +578,7 @@ export default function Dashboard() {
         <main className={styles.main}>
           <div className={styles.titleRow}>
             <div>
-              <span className={styles.eyebrow}>
-                THE WILLOWS NEST HOTEL
-              </span>
+              <span className={styles.eyebrow}>THE WILLOWS NEST HOTEL</span>
               <h1>
                 {view === "Conversations"
                   ? "Conversations"
@@ -632,10 +670,14 @@ export default function Dashboard() {
                   </article>
                 ))}
               </section>
-              <GuestFeedback api={API} revision={revision} onOpen={(id) => {
-                setConversationTarget(id);
-                setView("Conversations");
-              }} />
+              <GuestFeedback
+                api={API}
+                revision={revision}
+                onOpen={(id) => {
+                  setConversationTarget(id);
+                  setView("Conversations");
+                }}
+              />
               <div className={styles.grid}>
                 <section className={styles.panel}>
                   <div className={styles.panelHead}>
@@ -728,7 +770,12 @@ export default function Dashboard() {
               revision={revision}
               tickets={tickets}
               initialBookingId={conversationTarget}
-              initialScope={conversationTarget && !bookings.some(booking => booking._id === conversationTarget) ? "History" : "Current"}
+              initialScope={
+                conversationTarget &&
+                !bookings.some((booking) => booking._id === conversationTarget)
+                  ? "History"
+                  : "Current"
+              }
             />
           )}
           {view === "Requests" && (
@@ -865,12 +912,18 @@ export default function Dashboard() {
                       <button
                         disabled={
                           saving ||
-                          (requestScope === "History" && !current.requiresReceptionReview) ||
+                          (requestScope === "History" &&
+                            !current.requiresReceptionReview) ||
                           current.status === "Resolved"
                         }
                         onClick={() => void changeStatus("Resolved")}
                       >
-                        {current.requiresReceptionReview || ["Front Desk", "General Inquiry"].includes(current.category) ? "Close review" : "Complete & notify"}
+                        {current.requiresReceptionReview ||
+                        ["Front Desk", "General Inquiry"].includes(
+                          current.category,
+                        )
+                          ? "Close review"
+                          : "Complete & notify"}
                       </button>
                       <button
                         disabled={

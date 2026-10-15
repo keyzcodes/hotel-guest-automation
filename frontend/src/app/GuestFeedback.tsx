@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch as fetch } from "./apiClient";
 import { useEffect, useState } from "react";
 import styles from "./dashboard.module.css";
 type Feedback = { count: number; average: number | null; recent: { _id: string; roomNumber: string; guestName: string; guestRating: number; guestRatedAt: string }[] };

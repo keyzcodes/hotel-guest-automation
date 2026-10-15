@@ -36,3 +36,8 @@
 /* Fit the check-in drawer within the usable mobile viewport. */
 .overlay{height:100dvh;bottom:auto}.drawer{min-height:0;overscroll-behavior:contain;padding-bottom:max(24px,env(safe-area-inset-bottom))}
 .body,.main{min-width:0}
+
+/* Keep staff controls inside the existing mobile header. */
+.signOutLabel{display:inline}
+@media(max-width:699px){.signOutLabel{display:none}.header{padding-inline:12px}.headerActions{gap:6px}.mobileBrand{font-size:13px}.headerActions .connection{max-width:65px}}
+@media(max-width:359px){.headerActions>.avatar{display:none}}
