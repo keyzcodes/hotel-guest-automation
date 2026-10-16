@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: hotel-guest-ops
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm --prefix backend ci && npm --prefix frontend ci --include=dev && npm --prefix frontend run build
+    startCommand: node backend/server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.15.0
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      - key: SERVE_FRONTEND
+        value: "true"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: TELEGRAM_MODE
+        value: webhook
+      - key: TELEGRAM_WEBHOOK_SECRET
+        generateValue: true
+      - key: MONGO_URI
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.1-flash-lite
+      - key: USE_MOCK_AI
+        value: "false"
+      - key: JOB_DEMO_MODE
+        value: "true"
+      - key: STAFF_EMAIL
+        sync: false
+      - key: STAFF_PASSWORD_HASH
+        sync: false

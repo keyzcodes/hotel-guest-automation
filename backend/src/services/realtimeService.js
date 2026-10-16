@@ -37,4 +37,9 @@ function publishChange(collection) {
     else socket.emit('records:changed', { collection });
   }
 }
-module.exports = { startRealtime, publishChange, revokeSession };
+function closeRealtime() {
+  if (!io) return Promise.resolve();
+  const current = io; io = undefined;
+  return new Promise(resolve => current.close(resolve));
+}
+module.exports = { startRealtime, publishChange, revokeSession, closeRealtime };

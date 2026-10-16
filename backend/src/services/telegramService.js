@@ -187,4 +187,6 @@ module.exports = {
   sendReviewPrompt,
   startTelegramBot,
   sendStaffReply,
+  // Used only by the deployment transport; guest handlers remain shared.
+  createTransport: () => require("./telegramTransportService").createTelegramTransport(bot),
 };
