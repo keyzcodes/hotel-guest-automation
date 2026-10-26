@@ -518,9 +518,9 @@ export default function Dashboard() {
     <div className={styles.app}>
       <aside className={styles.sidebar}>
         <div className={styles.brand}>
-          <div className={styles.logo}>W</div>
+          <div className={styles.logo}>K</div>
           <div>
-            <strong>Willows Nest</strong>
+            <strong>Kudu Demo</strong>
             <small>GUEST OPERATIONS</small>
           </div>
         </div>
@@ -533,7 +533,7 @@ export default function Dashboard() {
       </aside>
       <div className={styles.body}>
         <header className={styles.header}>
-          <div className={styles.mobileBrand}>Willows Nest</div>
+          <div className={styles.mobileBrand}>Kudu Demo</div>
           <div className={styles.breadcrumb}>
             Workspace <span>/</span> {view}
           </div>
@@ -578,7 +578,7 @@ export default function Dashboard() {
         <main className={styles.main}>
           <div className={styles.titleRow}>
             <div>
-              <span className={styles.eyebrow}>THE WILLOWS NEST HOTEL</span>
+              <span className={styles.eyebrow}>KUDU DEMO</span>
               <h1>
                 {view === "Conversations"
                   ? "Conversations"
@@ -1022,7 +1022,7 @@ export default function Dashboard() {
             </div>
           )}
           <footer className={styles.footer}>
-            Guest services · The Willows Nest Hotel
+            Guest services · Kudu Demo
           </footer>
         </main>
       </div>

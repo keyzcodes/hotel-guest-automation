@@ -65,9 +65,9 @@ export default function StaffAccess({ children }: { children: React.ReactNode })
   }
   if (state === "signedIn") return <AccessContext.Provider value={{ logout, signingOut }}>{children}</AccessContext.Provider>;
   return <main className={styles.screen}>
-    <header className={styles.header}><div className={styles.brand}><span className={styles.logo}>W</span><span>The Willows Nest Hotel<small>STAFF ACCESS</small></span></div></header>
+    <header className={styles.header}><div className={styles.brand}><span className={styles.logo}>K</span><span>Kudu Demo<small>STAFF ACCESS</small></span></div></header>
     <div className={styles.content}>
-      <div className={styles.identity}><h1>The Willows<br />Nest Hotel</h1></div>
+      <div className={styles.identity}><h1>Kudu Demo</h1></div>
       <section className={styles.card} aria-label="Hotel staff sign-in">
         {state === "checking" ? <p role="status">Checking your session…</p> : state === "unavailable" ? <><h2>Unable to connect</h2><p>Staff access is temporarily unavailable.</p><button className={styles.primary} onClick={() => { setState("checking"); void check(); }}>Try again</button></> : <>
           <h2>Welcome back</h2><p>Sign in to continue.</p>
@@ -80,6 +80,6 @@ export default function StaffAccess({ children }: { children: React.ReactNode })
         </>}
       </section>
     </div>
-    <footer className={styles.footer}>The Willows Nest Hotel</footer>
+    <footer className={styles.footer}>Kudu Demo</footer>
   </main>;
 }
