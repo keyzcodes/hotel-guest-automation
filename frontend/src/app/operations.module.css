@@ -71,3 +71,21 @@ dialog.overlay:not([open]){display:none}
  .reportPage .periodFilters{grid-template-columns:1.1fr 1fr 1fr 1.4fr}
  .reportPage .periodFilters .periodFilter,.reportPage .periodFilters .departmentFilter{grid-column:auto}
 }
+
+
+/* Equal-height report controls with compact, visible labels in both themes. */
+.reportPage .periodFilters label,
+.reportPage .periodFilters label:nth-child(3){
+ display:grid;grid-template-rows:14px 24px;gap:2px;
+ height:54px;min-height:54px;padding:6px 10px;align-items:center;
+ min-width:0;
+}
+.reportPage .periodFilters label>span{font-size:12px;line-height:14px}
+.reportPage .periodFilters input,
+.reportPage .periodFilters select{
+ height:24px;min-height:0;line-height:24px;padding:0;
+ width:100%;max-width:100%;min-width:0;font-size:13px;
+}
+.shell select{color-scheme:light}
+:global(html[data-theme=dark]) .shell select{color-scheme:dark}
+.shell select option,.shell select optgroup{background:var(--surface);color:var(--text)}
