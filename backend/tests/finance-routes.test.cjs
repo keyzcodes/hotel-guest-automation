@@ -37,8 +37,11 @@ test('financial HTTP routes enforce feature/identity gates, validation, replay a
   process.env.SALES_EXPENSES_ENABLED = 'true'; assert.equal((await call('/config', 'GET', undefined, { 'x-test-shared': 'true' })).status, 403);
   assert.equal((await call('/entries', 'POST', { ...input, amount: -1 })).status, 400);
   assert.equal((await call('/entries', 'POST', input, { Origin: 'https://foreign.invalid' })).status, 403);
+  const foreignActor = await call('/entries', 'POST', input, { 'x-finance-actor': 'c'.repeat(24) });
+  assert.equal(foreignActor.status, 409);
+  assert.equal((await foreignActor.json()).code, 'IDENTITY_CHANGED');
   assert.equal(writes, 0);
-  const created = await call('/entries', 'POST', input); assert.equal(created.status, 201);
+  const created = await call('/entries', 'POST', input, { 'x-finance-actor': actor.id }); assert.equal(created.status, 201);
   const reply = await created.json(); assert.equal(reply.data.createdBy, actor.id);
   assert.equal(reply.data.amountKobo, 1000000); assert.equal(reply.data.creationHash, undefined);
   assert.equal((await call('/entries', 'POST', input)).status, 200); assert.equal(writes, 1);

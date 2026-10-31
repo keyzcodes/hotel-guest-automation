@@ -4,17 +4,25 @@ import { useStaffAccess } from '../StaffAccess';
 import { ApiError, Entry, FinanceConfig, message, request, today } from './client';
 import styles from '../operations.module.css';
 import WorkspaceDialog from '../WorkspaceDialog';
+import { useOfflineEntries } from './OfflineEntries';
+import { entryProblem, type QueueItem, type QueuedBody } from './offlineQueue';
 
 type Draft = { requestId: string; type: 'SALE' | 'EXPENSE'; businessDate: string; departmentId: string; categoryId: string; amount: string; note: string; uncertain: boolean; expectedVersion?: number };
-export default function EntryForm({ config, entry, onClose, onSaved }: { config: FinanceConfig; entry?: Entry; onClose: () => void; onSaved: () => void }) {
+export default function EntryForm({ config, entry, queuedItem, onClose, onSaved, onQueued }: { config: FinanceConfig; entry?: Entry; queuedItem?: QueueItem; onClose: () => void; onSaved: () => void; onQueued: () => void }) {
   const { identity } = useStaffAccess();
+  const queue = useOfflineEntries();
   const key = `hotel-finance-draft:${identity?.id}:${entry?.id || 'new'}`;
   const [form, setForm] = useState<Draft>({ requestId: '', type: entry?.type || 'SALE', businessDate: entry?.businessDate || today(), departmentId: entry?.departmentId || config.departments[0].id, categoryId: entry?.categoryId || '', amount: entry ? (entry.amountKobo / 100).toFixed(2) : '', note: entry?.note || '', uncertain: false, expectedVersion: entry?.version });
   const [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [storageError, setStorageError] = useState(false);
   const [conflict, setConflict] = useState(false);
   const flight = useRef(false);
+  const queued = queue.items.find(item => item.id === (queuedItem?.id || form.requestId)) || queuedItem;
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      if (queuedItem) {
+        setForm({ ...queuedItem.body, categoryId: queuedItem.body.categoryId || '', uncertain: true });
+        setReady(true); return;
+      }
       let draft: Partial<Draft> = {};
       {
         try {
@@ -29,16 +37,17 @@ export default function EntryForm({ config, entry, onClose, onSaved }: { config:
       setForm(current => ({ ...current, requestId: crypto.randomUUID(), ...draft })); setReady(true);
     }, 0);
     return () => clearTimeout(timer);
-  }, [entry, key]);
+  }, [entry, key, queuedItem]);
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || queued) return;
     try { sessionStorage.setItem(key, JSON.stringify(form)); } catch { /* Visible warning is set during save too. */ }
-  }, [form, ready, entry, key]);
+  }, [form, ready, entry, key, queued]);
   const dept = config.departments.find(item => item.id === form.departmentId);
-  const locked = busy || form.uncertain;
+  const locked = busy || form.uncertain || !!queued;
   function change(patch: Partial<Draft>) { if (!locked) setForm(current => ({ ...current, ...patch })); }
   async function submit(event: React.FormEvent) {
-    event.preventDefault(); if (!ready || flight.current) return;
+    event.preventDefault(); if (!ready || flight.current || queued) return;
+    if (entry && !navigator.onLine) { setError('Connect to the internet to save a correction. Your draft is retained.'); return; }
     flight.current = true; setBusy(true); setError(''); setConflict(false);
     // Persist the exact retry ID and freeze the payload BEFORE making the request.
     // A lost response may follow a successful database write.
@@ -46,6 +55,20 @@ export default function EntryForm({ config, entry, onClose, onSaved }: { config:
     try { sessionStorage.setItem(key, JSON.stringify(pending)); } catch { setStorageError(true); }
     const body = { type: form.type, businessDate: form.businessDate, departmentId: form.departmentId, categoryId: form.type === 'EXPENSE' ? form.categoryId : null, amount: form.amount, note: form.note,
       ...(entry ? { expectedVersion: form.expectedVersion, mutationId: form.requestId } : { requestId: form.requestId }) };
+    if (!entry) {
+      try {
+        const queuedBody = body as QueuedBody;
+        const problem = entryProblem(queuedBody, config, today());
+        if (problem) throw Error(problem);
+        await queue.save(queuedBody);
+        try { sessionStorage.removeItem(key); } catch { /* Durable queue owns the entry now. */ }
+        onQueued();
+      } catch (e) {
+        setForm(current => ({ ...current, uncertain: form.uncertain }));
+        setError(message(e));
+      } finally { flight.current = false; setBusy(false); }
+      return;
+    }
     try {
       await request(`/api/finance/entries${entry ? `/${entry.id}` : ''}`, { method: entry ? 'PATCH' : 'POST', body: JSON.stringify(body) });
       try { sessionStorage.removeItem(key); } catch { /* The next draft receives a new ID. */ }
@@ -72,7 +95,7 @@ export default function EntryForm({ config, entry, onClose, onSaved }: { config:
   }
   return <WorkspaceDialog label={entry ? 'Correct entry' : 'Add entry'} busy={busy} onClose={onClose}><section className={styles.drawer}>
     <div className={styles.heading}><h2 id="entry-title">{entry ? 'Correct entry' : 'Add entry'}</h2><button type="button" onClick={onClose} disabled={busy} aria-label="Close entry">✕</button></div>
-    <p className={styles.muted}>{entry ? `Draft based on version ${form.expectedVersion}. Changes retain the previous values.` : 'Draft autosave uses this browser tab. Save entry adds the record to reports.'}</p>
+    <p className={styles.muted}>{entry ? `Draft based on version ${form.expectedVersion}. Changes retain the previous values.` : 'Draft saved in this tab. Offline entries sync when connected.'}</p>
     {storageError && <p role="status">Browser draft storage is unavailable. Keep this form open until saving is confirmed.</p>}
     <form onSubmit={submit} className={styles.form}>
       <div className={styles.segment} aria-label="Entry type">{(['SALE', 'EXPENSE'] as const).map(type => <button key={type} type="button" aria-pressed={form.type === type} disabled={locked || !!entry} onClick={() => change({ type, categoryId: '', departmentId: type === 'SALE' && !dept?.sales ? config.departments.find(item => item.sales)!.id : form.departmentId })}>{type === 'SALE' ? 'Daily sales' : 'Expense'}</button>)}</div>
@@ -82,9 +105,14 @@ export default function EntryForm({ config, entry, onClose, onSaved }: { config:
       <label>Amount (₦)<input inputMode="decimal" autoFocus required pattern="(0|[1-9][0-9]*)(\.[0-9]{1,2})?" placeholder="0.00" value={form.amount} disabled={locked} onChange={e => change({ amount: e.target.value })} /></label>
       <label>Note <span className={styles.muted}>(optional)</span><textarea maxLength={500} value={form.note} disabled={locked} onChange={e => change({ note: e.target.value })} /></label>
       {error && <p role="alert" className={styles.alert}>{error}</p>}
+      {queued && <p role={queued.status === 'review' ? 'alert' : 'status'}>{queued.status === 'saved' ? 'Saved' : queued.status === 'review' ? `Needs review. ${queued.message}` : 'Saved on this device · Waiting to sync'}</p>}
+      {queued?.status === 'review' && <button type="button" onClick={async () => {
+        if (!window.confirm('Dismiss this rejected entry? It was not added to reports. Check the saved records before entering it again.')) return;
+        try { await queue.dismiss(queued); onClose(); } catch (e) { setError(message(e)); }
+      }}>Dismiss unsaved entry</button>}
       {conflict && <button type="button" disabled={busy} onClick={() => void loadSaved()}>Load latest saved version</button>}
-      <button type="submit" className={styles.primary} disabled={!ready || busy}>{busy ? 'Saving…' : form.uncertain ? 'Retry same save' : entry ? 'Save correction' : 'Save entry'}</button>
-      {form.uncertain && <p role="status">Save not confirmed. Fields are locked to prevent a changed retry from creating conflicting records.</p>}
+      <button type="submit" className={styles.primary} disabled={!ready || busy || !!queued}>{queued ? queued.status === 'saved' ? 'Saved' : queued.status === 'review' ? 'Needs review' : 'Waiting to sync' : busy ? 'Saving…' : form.uncertain ? 'Retry same save' : entry ? 'Save correction' : 'Save entry'}</button>
+      {form.uncertain && !queued && <p role="status">Save not confirmed. Fields are locked to prevent a changed retry from creating conflicting records.</p>}
     </form>
   </section></WorkspaceDialog>;
 }

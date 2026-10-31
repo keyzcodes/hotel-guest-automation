@@ -14,6 +14,9 @@ router.use((req, res, next) => {
   if (!config.enabled()) return res.status(404).json({ success: false, message: 'Reporting is not enabled.' });
   if (!auth.individualAccountsEnabled() || !idPattern.test(req.staffSession?.staff?.id || ''))
     return res.status(403).json({ success: false, message: 'Sign in with an individual staff account.' });
+  const expectedActor = req.headers['x-finance-actor'];
+  if (expectedActor !== undefined && expectedActor !== req.staffSession.staff.id)
+    return res.status(409).json({ success: false, code: 'IDENTITY_CHANGED', message: 'Sign in with the account that saved this pending entry.' });
   next();
 });
 const handle = action => async (req, res) => {

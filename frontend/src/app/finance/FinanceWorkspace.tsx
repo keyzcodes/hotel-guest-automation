@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStaffAccess } from '../StaffAccess';
 import { ApiError, Entry, FinanceConfig, Summary, message, money, request, today } from './client';
 import EntryForm from './EntryForm';
+import { useOfflineEntries } from './OfflineEntries';
+import type { QueueItem } from './offlineQueue';
 import WorkspaceDialog from '../WorkspaceDialog';
 import styles from '../operations.module.css';
 import { parseReportPosition } from '../workspacePosition';
@@ -15,6 +17,8 @@ function remaining(row: Summary['departments'][number]) {
 
 export default function FinanceWorkspace({ compact = false, onReports }: { compact?: boolean; onReports?: () => void }) {
   const { identity } = useStaffAccess();
+  const queue = useOfflineEntries();
+  const [pendingEditor, setPendingEditor] = useState<QueueItem | null>(null);
   const [amountsHidden, setAmountsHidden] = useState(false);
   const positionKey = `hotel-report-position:${identity?.id || identity?.email}`;
   const [positionReady, setPositionReady] = useState(compact);
@@ -74,7 +78,8 @@ export default function FinanceWorkspace({ compact = false, onReports }: { compa
     // Explicit refresh and returning to a visible tab update saved records.
     const visible = () => { if (!document.hidden) setReload(value => value + 1); };
     document.addEventListener('visibilitychange', visible);
-    return () => { controller.abort(); clearTimeout(timer); document.removeEventListener('visibilitychange', visible); };
+    window.addEventListener('hotel-finance-synced', visible);
+    return () => { controller.abort(); clearTimeout(timer); document.removeEventListener('visibilitychange', visible); window.removeEventListener('hotel-finance-synced', visible); };
   }, [refresh, reload, positionReady]);
   useEffect(() => {
     if (compact) return;
@@ -169,6 +174,8 @@ export default function FinanceWorkspace({ compact = false, onReports }: { compa
   return <section className={styles.reportPage}>
     <div className={styles.heading}><div><h1>Reports</h1></div><button className={styles.primary} onClick={() => openEditor('new')} disabled={!config}>+ Add entry</button></div>
     <div className={`${styles.filters} ${styles.periodFilters}`}><label className={styles.periodFilter}><span>Period</span><select value={period} onChange={e => selectPeriod(e.target.value as ReportPeriod)}>{reportPeriods.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>From</span><input type="date" value={from} onChange={e => { setFrom(e.target.value); setPeriod('custom'); setNotice(''); }} /></label><label><span>To</span><input type="date" value={to} onChange={e => { setTo(e.target.value); setPeriod('custom'); setNotice(''); }} /></label><label className={styles.departmentFilter}><span>Department</span><select value={department} onChange={e => setDepartment(e.target.value)}><option value="">All departments</option>{config?.departments.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label></div>
+    {queue.error && <p role="status">{queue.error}</p>}
+    {queue.items.some(item => item.status !== 'saved') && <details><summary>{queue.items.filter(item => item.status === 'waiting').length} waiting to sync · {queue.items.filter(item => item.status === 'review').length} need review</summary>{queue.items.filter(item => item.status !== 'saved').map(item => <button type="button" className={styles.entryRow} key={item.id} onClick={() => setPendingEditor(item)}><span>{name(item.body.departmentId)} · {item.body.businessDate}<small>{item.status === 'review' ? 'Needs review' : 'Waiting to sync'}</small></span><strong>₦{item.body.amount}</strong></button>)}</details>}
     {error && <p role="alert" className={styles.alert}>{error}{data ? ' Last loaded records remain visible.' : ''}</p>}
     {notice && <p role="status">{notice}</p>}
     {!data ? <p role="status">{error ? 'Records could not be loaded.' : 'Loading records…'}</p> : <>
@@ -176,7 +183,8 @@ export default function FinanceWorkspace({ compact = false, onReports }: { compa
       <div className={`${styles.heading} ${styles.reportToolbar}`}><div className={styles.segment}><button aria-pressed={mode === 'summary'} onClick={() => setMode('summary')}>Summary</button><button aria-pressed={mode === 'entries'} onClick={() => setMode('entries')}>Daily entries</button></div><div className={styles.reportActions}><button aria-label="Refresh report" title="Refresh report" onClick={() => setReload(value => value + 1)} disabled={busy}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1" /></svg>{busy ? 'Refreshing…' : 'Refresh'}</button><button onClick={() => void print()} disabled={printing || busy || !!error}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M7 8V3h10v5M7 17H4V9h16v8h-3M7 14h10v7H7zM16 11h1" /></svg>{printing ? 'Preparing…' : 'Print / PDF'}</button></div></div>
       {mode === 'summary' ? <div className={styles.tableWrap} role="region" aria-label="Department totals" tabIndex={0}><table><thead><tr><th>Department</th><th>Sales</th><th>Expenses</th><th>Money left</th></tr></thead><tbody>{data.summary.departments.map(row => <tr key={row.departmentId}><td><button className={styles.link} onClick={() => { setDepartment(row.departmentId); setMode('entries'); }}>{row.name}</button>{row.supportsSales && row.salesStatus !== 'COMPLETE' && row.salesStatus !== 'NOT_ENTERED' && <small>{row.missingSalesDates.length} days missing</small>}</td><td>{row.salesStatus === 'NOT_ENTERED' ? 'Not entered' : money(row.salesKobo)}</td><td>{money(row.expensesKobo)}</td><td>{remaining(row)}</td></tr>)}</tbody></table></div> : <><div className={styles.entries}>{data.entries.map(row => <button className={styles.entryRow} key={row.id} onClick={() => void openDetail(row.id)}><span><strong>{name(row.departmentId)}</strong><small>{row.businessDate} · {row.type === 'SALE' ? 'Daily sales' : 'Expense'}{row.state === 'VOID' ? ' · Voided' : ''}</small></span><strong>{money(row.amountKobo)}</strong></button>)}</div>{!data.entries.length && <p>No entries recorded for this period.</p>}{data.cursor && <button disabled={loadingMore} onClick={() => void more()}>{loadingMore ? 'Loading…' : 'Load more entries'}</button>}</>}
     </>}
-    {editor && config && <EntryForm key={editor === 'new' ? 'new' : editor.id} config={config} entry={editor === 'new' ? undefined : editor} onClose={closeEditor} onSaved={() => { closeEditor(); setNotice('Entry saved.'); setReload(value => value + 1); }} />}
+    {editor && config && <EntryForm key={editor === 'new' ? 'new' : editor.id} config={config} entry={editor === 'new' ? undefined : editor} onClose={closeEditor} onQueued={() => { setNotice(''); try { sessionStorage.removeItem(`hotel-finance-open:${identity?.id}`); } catch { /* Queue retained independently. */ } }} onSaved={() => { closeEditor(); setNotice('Entry saved.'); setReload(value => value + 1); }} />}
+    {pendingEditor && config && <EntryForm key={pendingEditor.id} config={config} queuedItem={pendingEditor} onClose={() => setPendingEditor(null)} onQueued={() => {}} onSaved={() => {}} />}
     {detail && <WorkspaceDialog label="Entry details" busy={voiding} onClose={closeDetail}><section className={styles.drawer}><div className={styles.heading}><h2>{name(detail.departmentId)}</h2><button onClick={() => { if (!voiding) closeDetail(); }} disabled={voiding} aria-label="Close entry details">✕</button></div><p>{detail.businessDate} · {detail.type} · {detail.state}</p><strong className={styles.amount}>{money(detail.amountKobo)}</strong><p>{detail.note}</p>{detail.state === 'POSTED' && <><button className={styles.primary} disabled={voiding || !!voidAttempt} onClick={() => openEditor(detail)}>Correct entry</button><label className={styles.voidLabel}>Reason to void<input value={voidReason} maxLength={200} disabled={voiding || !!voidAttempt} onChange={e => setVoidReason(e.target.value)} /></label><button disabled={voiding || (!voidAttempt && !voidReason.trim())} onClick={() => void voidEntry()}>{voiding ? 'Voiding…' : voidAttempt ? 'Retry same void' : 'Void entry'}</button></>}{error && <><p role="alert" className={styles.alert}>{error}</p><button disabled={voiding} onClick={() => void openDetail(detail.id)}>Reload saved entry</button></>}<h3>Correction history</h3>{detail.history?.map((event, i) => <article className={styles.audit} key={i}><strong>{event.action} · {event.actorName}</strong><small>{new Date(event.at).toLocaleString('en-GB', { timeZone: 'Africa/Lagos' })}</small><p>{event.before ? `${money(event.before.amountKobo)} → ` : ''}{money(event.after.amountKobo)}</p>{event.reason && <p>{event.reason}</p>}</article>)}</section></WorkspaceDialog>}
   </section>;
 }
