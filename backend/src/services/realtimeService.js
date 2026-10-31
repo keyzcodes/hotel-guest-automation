@@ -23,18 +23,30 @@ function startRealtime(server) {
     // Disconnect at absolute expiry even when no new HTTP request is made.
     const timer = setTimeout(() => socket.disconnect(true), Math.max(0,new Date(session.expiresAt).getTime()-Date.now()));
     timer.unref?.();
-    socket.on('disconnect', () => clearTimeout(timer));
+    // Recheck account access even when a connected client makes no HTTP calls.
+    const accessTimer = auth.individualAccountsEnabled() ? setInterval(async () => {
+      try {
+        if (!await auth.authenticate(socket.request.headers)) socket.disconnect(true);
+      } catch { socket.disconnect(true); }
+    }, 30000) : null;
+    accessTimer?.unref?.();
+    socket.on('disconnect', () => { clearTimeout(timer); if (accessTimer) clearInterval(accessTimer); });
   });
   return io;
 }
 function revokeSession(id) { io?.in(`staff-session:${id}`).disconnectSockets(true); }
-function publishChange(collection) {
+async function publishChange(collection) {
   if (!io) return;
   const configured = auth.account();
   for (const socket of io.sockets.sockets.values()) {
     const session = socket.data.staffSession;
-    if (!configured || session?.accountFingerprint !== configured.fingerprint || new Date(session.expiresAt) <= new Date()) socket.disconnect(true);
-    else socket.emit('records:changed', { collection });
+    try {
+      const valid = auth.individualAccountsEnabled()
+        ? await auth.authenticate(socket.request.headers)
+        : configured && session?.accountFingerprint === configured.fingerprint && new Date(session.expiresAt) > new Date();
+      if (!valid) socket.disconnect(true);
+      else socket.emit('records:changed', { collection });
+    } catch { socket.disconnect(true); }
   }
 }
 function closeRealtime() {

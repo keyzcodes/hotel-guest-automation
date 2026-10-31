@@ -63,12 +63,14 @@ export default function ChatWorkspace({
   tickets,
   initialBookingId = "",
   initialScope = "Current",
+  embedded = false,
 }: {
   api: string;
   revision: number;
   tickets: Ticket[];
   initialBookingId?: string;
   initialScope?: "Current" | "History";
+  embedded?: boolean;
 }) {
   const [taskBusy, setTaskBusy] = useState("");
   const [taskNotice, setTaskNotice] = useState("");
@@ -152,7 +154,7 @@ export default function ChatWorkspace({
     const resize = () => {
       workspace.current?.style.setProperty(
         "--chat-height",
-        `${viewport?.height || window.innerHeight}px`,
+        `${Math.max(180, (viewport?.height || window.innerHeight) - (embedded ? (document.querySelector('[aria-label="Mobile hotel workspaces"]')?.getBoundingClientRect().height || 0) : 0))}px`,
       );
       workspace.current?.style.setProperty(
         "--chat-top",
@@ -168,7 +170,7 @@ export default function ChatWorkspace({
       viewport?.removeEventListener("scroll", resize);
       window.removeEventListener("resize", resize);
     };
-  }, []);
+  }, [embedded]);
 
   useEffect(() => {
     if (!selectionReady) return;

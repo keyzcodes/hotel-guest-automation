@@ -1,7 +1,8 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import styles from "./staff-access.module.css";
-const AccessContext = createContext<{ logout: () => Promise<void>; signingOut: boolean }>({ logout: async () => {}, signingOut: false });
+export type StaffIdentity = { id?: string; email: string; name?: string; role?: 'GM' | 'STAFF'; hotelName?: string; modules?: { salesExpenses?: boolean }; guestMessagingEnabled?: boolean };
+const AccessContext = createContext<{ logout: () => Promise<void>; signingOut: boolean; identity: StaffIdentity | null }>({ logout: async () => {}, signingOut: false, identity: null });
 export const useStaffAccess = () => useContext(AccessContext);
 function clearStaffDrafts() {
   try {
@@ -19,6 +20,8 @@ export default function StaffAccess({ children }: { children: React.ReactNode })
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [signingOut, setSigningOut] = useState(false);
+  const [identity, setIdentity] = useState<StaffIdentity | null>(null);
+  const [hotelName, setHotelName] = useState('Hotel');
   const check = useCallback(async () => {
     if (checking.current) return;
     checking.current = true;
@@ -26,14 +29,25 @@ export default function StaffAccess({ children }: { children: React.ReactNode })
     try {
       const response = await fetch("/api/auth/session", { cache: "no-store", credentials: "same-origin", signal: AbortSignal.timeout(12000) });
       if (revision !== authRevision.current) return;
-      if (response.ok) { setState("signedIn"); setError(""); }
+      if (response.ok) {
+        const data = await response.json();
+        if (revision !== authRevision.current) return;
+        setIdentity(data); setState("signedIn"); setError("");
+      }
       else if (response.status === 401) { clearStaffDrafts(); setState("signedOut"); }
       else setState(current => current === "signedIn" ? current : "unavailable");
     } catch { if (revision === authRevision.current) setState(current => current === "signedIn" ? current : "unavailable"); }
     finally { checking.current = false; }
   }, []);
   useEffect(() => {
-    const expired = () => { authRevision.current++; clearStaffDrafts(); setState("signedOut"); setPassword(""); setError("Your session has ended. Please sign in again."); };
+    const controller = new AbortController();
+    fetch('/api/auth/branding', { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]) })
+      .then(async response => { if (response.ok) { const data = await response.json(); if (!controller.signal.aborted && typeof data.hotelName === 'string') { setHotelName(data.hotelName); document.title = `${data.hotelName} | Hotel operations`; } } })
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
+  useEffect(() => {
+    const expired = () => { authRevision.current++; clearStaffDrafts(); setIdentity(null); setState("signedOut"); setPassword(""); setError("Your session has ended. Please sign in again."); };
     const focus = () => { void check(); };
     window.addEventListener("hotel-session-expired", expired);
     window.addEventListener("focus", focus);
@@ -47,7 +61,7 @@ export default function StaffAccess({ children }: { children: React.ReactNode })
     try {
       const response = await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin", signal: AbortSignal.timeout(12000) });
       if (!response.ok) throw Error("Sign-out could not be confirmed. Please try again.");
-      clearStaffDrafts(); setState("signedOut"); setPassword(""); setError("");
+      clearStaffDrafts(); setIdentity(null); setState("signedOut"); setPassword(""); setError("");
     } catch (e) { window.alert(e instanceof Error ? e.message : "Sign-out failed. Please try again."); }
     finally { setSigningOut(false); }
   };
@@ -59,15 +73,15 @@ export default function StaffAccess({ children }: { children: React.ReactNode })
       const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ email, password }), signal: AbortSignal.timeout(15000) });
       const data = await response.json();
       if (!response.ok || !data.success) throw Error(data.message || "Sign-in could not finish.");
-      setPassword(""); setVisible(false); setState("signedIn");
+      setIdentity(data); setPassword(""); setVisible(false); setState("signedIn");
     } catch (e) { setError(e instanceof Error ? e.message : "Sign-in is temporarily unavailable."); }
     finally { setBusy(false); }
   }
-  if (state === "signedIn") return <AccessContext.Provider value={{ logout, signingOut }}>{children}</AccessContext.Provider>;
+  if (state === "signedIn") return <AccessContext.Provider value={{ logout, signingOut, identity }}>{children}</AccessContext.Provider>;
   return <main className={styles.screen}>
-    <header className={styles.header}><div className={styles.brand}><span className={styles.logo}>K</span><span>Kudu Demo<small>STAFF ACCESS</small></span></div></header>
+    <header className={styles.header}><div className={styles.brand}><span className={styles.logo}>{hotelName[0]}</span><span>{hotelName}<small>STAFF ACCESS</small></span></div></header>
     <div className={styles.content}>
-      <div className={styles.identity}><h1>Kudu Demo</h1></div>
+      <div className={styles.identity}><h1>{hotelName}</h1></div>
       <section className={styles.card} aria-label="Hotel staff sign-in">
         {state === "checking" ? <p role="status">Checking your session…</p> : state === "unavailable" ? <><h2>Unable to connect</h2><p>Staff access is temporarily unavailable.</p><button className={styles.primary} onClick={() => { setState("checking"); void check(); }}>Try again</button></> : <>
           <h2>Welcome back</h2><p>Sign in to continue.</p>
@@ -80,6 +94,6 @@ export default function StaffAccess({ children }: { children: React.ReactNode })
         </>}
       </section>
     </div>
-    <footer className={styles.footer}>Kudu Demo</footer>
+    <footer className={styles.footer}>{hotelName}</footer>
   </main>;
 }

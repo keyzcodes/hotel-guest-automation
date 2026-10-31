@@ -9,6 +9,12 @@ const derive = promisify(scrypt);
 const COOKIE = "hotel_staff_session";
 const SESSION_MS = 8 * 60 * 60 * 1000;
 const sha = (value) => createHash("sha256").update(value).digest("hex");
+const individualAccountsEnabled = () => process.env.STAFF_ACCOUNTS_ENABLED === "true";
+
+// API responses expose identity, never password hashes or session tokens.
+const publicIdentity = (staff) => ({
+  id: String(staff._id), email: staff.email, name: staff.name, role: staff.role,
+});
 const allowedOrigins = () =>
   (
     process.env.FRONTEND_ORIGINS ||
@@ -80,15 +86,33 @@ function cookieOptions() {
 async function authenticate(
   headers,
   Sessions = require("../models/StaffSession"),
+  Accounts,
 ) {
   const configured = account(),
     token = tokenFrom(headers);
-  if (!configured || !token) return null;
-  return Sessions.findOne({
+  if (!token) return null;
+  if (individualAccountsEnabled()) {
+    const session = await Sessions.findOne({
+      tokenHash: sha(token), staffId: { $exists: true },
+      expiresAt: { $gt: new Date() },
+    }).lean();
+    if (!session) return null;
+    const staff = await (Accounts || require('../models/StaffAccount')).findOne({
+      _id: session.staffId, active: true, authVersion: session.authVersion,
+    }).lean();
+    return staff ? { ...session, staff: publicIdentity(staff) } : null;
+  }
+  if (!configured) return null;
+  const session = await Sessions.findOne({
     tokenHash: sha(token),
     accountFingerprint: configured.fingerprint,
     expiresAt: { $gt: new Date() },
   }).lean();
+  return session ? { ...session, staff: { email: configured.email, name: 'Hotel staff', role: 'GM' } } : null;
+}
+function requireGM(req, res, next) {
+  if (req.staffSession?.staff?.role === 'GM') return next();
+  return res.status(403).json({ success: false, message: 'Only the GM can manage staff accounts.' });
 }
 async function requireStaff(req, res, next) {
   res.set("Cache-Control", "no-store");
@@ -132,5 +156,8 @@ module.exports = {
   requireStaff,
   requireOrigin,
   allowedOrigins,
+  individualAccountsEnabled,
+  publicIdentity,
+  requireGM,
   newToken: () => randomBytes(32).toString("hex"),
 };

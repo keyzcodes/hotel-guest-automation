@@ -41,3 +41,12 @@
 .signOutLabel{display:inline}
 @media(max-width:699px){.signOutLabel{display:none}.header{padding-inline:12px}.headerActions{gap:6px}.mobileBrand{font-size:13px}.headerActions .connection{max-width:65px}}
 @media(max-width:359px){.headerActions>.avatar{display:none}}
+
+/* The original guest workspace keeps its own sections inside the shared shell. */
+.embedded{display:block;min-height:0;background:transparent}
+.embedded>.sidebar,.embedded>.mobileNav,.embedded>.body>.header{display:none}
+.embedded>.body{margin:0;width:100%}
+.embedded .main{padding:18px 0 0;max-width:none}
+.sectionNav{display:flex;gap:4px;overflow-x:auto;border-bottom:1px solid var(--border);padding-bottom:8px}
+.sectionNav button{flex:1;min-width:max-content;border:0;font-size:12px;padding:9px;gap:6px}
+@media(max-width:699px){.sectionNav button svg{display:none}.embedded .detailOpen{inset:120px 0 78px}}

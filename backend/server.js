@@ -19,13 +19,22 @@ if (process.env.TRUST_PROXY === "1") app.set("trust proxy", 1);
 app.use(cors({ origin: staffAuth.allowedOrigins(), credentials: true }));
 app.use(express.json({ limit: "32kb" }));
 let ready = false;
-const telegram = require("./src/services/telegramService");
-const transport = telegram.createTransport();
+// Financial UI testing must not take over the hosted Telegram bot.
+const messagingPolicy = require('./src/services/guestMessagingPolicy');
+const messagingEnabled = messagingPolicy.enabled();
+const transport = messagingEnabled
+  ? require('./src/services/telegramService').createTransport()
+  : { mount() {}, async start() {}, async stop() {} };
 // This one secret-verified route belongs to Telegram, not the staff API.
 transport.mount(app, () => ready && mongoose.connection.readyState === 1);
 app.use("/api", staffAuth.requireOrigin);
 app.use("/api/auth", require("./src/routes/staffAuthRoutes"));
 app.use("/api", staffAuth.requireStaff);
+app.use('/api', messagingPolicy.rejectDisabledSends);
+app.use("/api/staff", require("./src/routes/staffAccountRoutes"));
+if (require('./src/modules/sales-expenses/config').enabled()) {
+  app.use("/api/finance", require("./src/modules/sales-expenses/routes"));
+}
 app.use("/api/bookings", require("./src/routes/bookingRoutes"));
 app.use("/api/tasks", require("./src/routes/taskRoutes"));
 app.use("/api/conversations", require("./src/routes/conversationRoutes"));
@@ -42,7 +51,7 @@ app.get("/health", (req, res) => {
 let nextApp;
 async function start() {
   if (!process.env.MONGO_URI) throw new Error("MONGO_URI is required.");
-  if (process.env.NODE_ENV === "production" && !staffAuth.account()) throw new Error("Configure staff credentials before deployment.");
+  if (process.env.NODE_ENV === "production" && !staffAuth.individualAccountsEnabled() && !staffAuth.account()) throw new Error("Configure staff credentials before deployment.");
   if (process.env.SERVE_FRONTEND === "true") {
     // Use the existing frontend dependency tree; no second public service needed.
     const frontend = path.join(__dirname, "../frontend");
@@ -62,12 +71,22 @@ async function start() {
     require("./src/models/StaffSession").init(),
     require("./src/models/StaffLoginAttempt").init(),
   ]);
+  if (staffAuth.individualAccountsEnabled()) {
+    const Accounts = require('./src/models/StaffAccount');
+    await Accounts.init();
+    if (!await Accounts.exists({ role: 'GM', active: true })) throw new Error('Create the GM account before enabling individual staff accounts.');
+  }
+  if (require('./src/modules/sales-expenses/config').enabled()) {
+    if (!staffAuth.individualAccountsEnabled()) throw new Error('Reporting requires individual staff accounts.');
+    // Readiness waits for uniqueness indexes, before any financial requests run.
+    await require('./src/modules/sales-expenses/model').init();
+  }
   const port = Number(process.env.PORT || 5000);
   await new Promise((resolve, reject) => {
     httpServer.once("error", reject);
     httpServer.listen(port, "0.0.0.0", resolve);
   });
-  await require("./src/services/jobWorker").startJobWorker();
+  if (messagingEnabled) await require("./src/services/jobWorker").startJobWorker();
   await transport.start(() => {
     console.error("Telegram polling stopped; restarting the service is required.");
     void shutdown(1);

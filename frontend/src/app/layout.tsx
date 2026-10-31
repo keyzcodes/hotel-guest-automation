@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import StaffAccess from './StaffAccess';
 export const metadata: Metadata = {
-  title: 'Kudu Demo | Guest Operations',
+  title: 'Hotel Operations',
   description: 'Hotel guest services and operations dashboard',
 };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
