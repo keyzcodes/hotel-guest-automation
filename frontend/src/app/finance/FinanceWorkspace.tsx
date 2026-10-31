@@ -7,6 +7,7 @@ import WorkspaceDialog from '../WorkspaceDialog';
 import styles from '../operations.module.css';
 import { parseReportPosition } from '../workspacePosition';
 import { loadFinanceView } from './loadFinanceView';
+import { matchingPeriod, periodDates, reportPeriods, ReportPeriod } from './reportPeriod';
 
 function remaining(row: Summary['departments'][number]) {
   return row.supportsSales && row.salesStatus === 'NOT_ENTERED' ? '—' : money((row.salesKobo ?? 0) - row.expensesKobo);
@@ -19,6 +20,7 @@ export default function FinanceWorkspace({ compact = false, onReports }: { compa
   const [positionReady, setPositionReady] = useState(compact);
   const [detailTarget, setDetailTarget] = useState('');
   const [from, setFrom] = useState(`${today().slice(0, 7)}-01`), [to, setTo] = useState(today()), [department, setDepartment] = useState('');
+  const [period, setPeriod] = useState<ReportPeriod>('this-month');
   const [config, setConfig] = useState<FinanceConfig | null>(null);
   const [loaded, setLoaded] = useState<{ key: string; summary: Summary; entries: Entry[]; cursor: string | null } | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [mode, setMode] = useState<'summary' | 'entries'>('summary');
@@ -43,6 +45,7 @@ export default function FinanceWorkspace({ compact = false, onReports }: { compa
       try { saved = parseReportPosition(sessionStorage.getItem(positionKey)); } catch { /* Storage may be unavailable. */ }
       if (saved.from) setFrom(saved.from);
       if (saved.to) setTo(saved.to);
+      if (saved.from && saved.to) setPeriod(matchingPeriod(saved.from, saved.to, today()));
       if (saved.department !== undefined) setDepartment(saved.department);
       if (saved.mode) setMode(saved.mode);
       if (saved.detailId) void openDetail(saved.detailId);
@@ -87,6 +90,11 @@ export default function FinanceWorkspace({ compact = false, onReports }: { compa
     }, 0);
     return () => clearTimeout(timer);
   }, [compact, identity?.id]);
+  function selectPeriod(value: ReportPeriod) {
+    setPeriod(value);
+    const range = periodDates(value, today());
+    if (range) { setFrom(range.from); setTo(range.to); setNotice(''); }
+  }
   const data = loaded?.key === query ? loaded : null;
   const name = (id: string) => config?.departments.find(row => row.id === id)?.name || id;
   function openEditor(entry: Entry | 'new') {
@@ -160,7 +168,7 @@ export default function FinanceWorkspace({ compact = false, onReports }: { compa
   if (compact) return <section className={styles.panel}><div className={styles.heading}><div className={styles.panelTitle}><h2>This month</h2>{eye}</div><button onClick={onReports}>View reports →</button></div>{totals}{error && <p role="status">Financial data unavailable. Last loaded figures may be out of date.</p>}</section>;
   return <section className={styles.reportPage}>
     <div className={styles.heading}><div><h1>Reports</h1></div><button className={styles.primary} onClick={() => openEditor('new')} disabled={!config}>+ Add entry</button></div>
-    <div className={styles.filters}><label><span>From</span><input type="date" value={from} onChange={e => setFrom(e.target.value)} /></label><label><span>To</span><input type="date" value={to} onChange={e => setTo(e.target.value)} /></label><label><span className={styles.srOnly}>Department</span><select value={department} onChange={e => setDepartment(e.target.value)}><option value="">All departments</option>{config?.departments.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label></div>
+    <div className={`${styles.filters} ${styles.periodFilters}`}><label className={styles.periodFilter}><span>Period</span><select value={period} onChange={e => selectPeriod(e.target.value as ReportPeriod)}>{reportPeriods.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span>From</span><input type="date" value={from} onChange={e => { setFrom(e.target.value); setPeriod('custom'); setNotice(''); }} /></label><label><span>To</span><input type="date" value={to} onChange={e => { setTo(e.target.value); setPeriod('custom'); setNotice(''); }} /></label><label className={styles.departmentFilter}><span className={styles.srOnly}>Department</span><select value={department} onChange={e => setDepartment(e.target.value)}><option value="">All departments</option>{config?.departments.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label></div>
     {error && <p role="alert" className={styles.alert}>{error}{data ? ' Last loaded records remain visible.' : ''}</p>}
     {notice && <p role="status">{notice}</p>}
     {!data ? <p role="status">{error ? 'Records could not be loaded.' : 'Loading records…'}</p> : <>

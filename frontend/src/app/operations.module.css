@@ -53,3 +53,21 @@ dialog.overlay:not([open]){display:none}
 @media(max-width:359px){.shell .metric{padding:14px 10px;gap:8px}.activityIcon{width:23px;height:23px}.metric small{font-size:11px}}
 
 @media(min-width:1050px){.overviewPanels>section:first-child{order:0}}
+
+/* Staff form and existing account-menu usability only. */
+.staffFormTitle,.settingsTitle{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.passwordControl{display:block;position:relative}.passwordControl input{padding-right:50px}.shell .passwordControl button{position:absolute;right:1px;top:1px;bottom:1px;width:44px;min-height:42px;padding:10px;border:0;background:transparent;display:grid;place-items:center}.passwordControl svg{width:21px;height:21px}
+.profile summary{position:relative}.settingsBadge{position:absolute;right:-3px;bottom:-3px;width:20px;height:20px;background:var(--surface);border:1px solid var(--border);border-radius:50%;display:grid;place-items:center;color:var(--blue)}.settingsBadge svg{width:14px;height:14px}
+.profile>div{max-width:calc(100vw - 32px)}.shell .settingsTitle button{min-width:44px;min-height:44px;padding:6px;border:0;font-size:24px}.staffFormTitle small{white-space:nowrap}.form .passwordControl{min-width:0}.form input{min-width:0}
+
+/* Reports period shortcuts: full-width on phones, one filter row on wide screens. */
+.reportPage .periodFilters{grid-template-columns:repeat(2,minmax(0,1fr))}
+.reportPage .periodFilters label:nth-child(3){grid-column:auto;padding:8px 10px}
+.reportPage .periodFilters .periodFilter,.reportPage .periodFilters .departmentFilter{grid-column:1/-1}
+@media(min-width:760px){
+ .reportPage .periodFilters label{display:grid;gap:3px;padding:8px 10px}
+}
+@media(min-width:1200px){
+ .reportPage .periodFilters{grid-template-columns:1.1fr 1fr 1fr 1.4fr}
+ .reportPage .periodFilters .periodFilter,.reportPage .periodFilters .departmentFilter{grid-column:auto}
+}
