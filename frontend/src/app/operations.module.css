@@ -89,3 +89,15 @@ dialog.overlay:not([open]){display:none}
 .shell select{color-scheme:light}
 :global(html[data-theme=dark]) .shell select{color-scheme:dark}
 .shell select option,.shell select optgroup{background:var(--surface);color:var(--text)}
+
+/* Group by department and date; individual records load only on opening a day. */
+.dailyList{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px}
+.dailyHead,.shell .dailyRow{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr) 10px;gap:6px;align-items:center}
+.dailyHead{padding:12px 10px;background:var(--wash);font-size:11px}
+.shell .dailyRow{width:100%;border:0;border-bottom:1px solid var(--border);border-radius:0;background:transparent;padding:14px 10px;text-align:left;min-height:64px}
+.dailyRow:last-child{border-bottom:0}.dailyRow>span{min-width:0;overflow-wrap:anywhere;font-size:12px}
+.dailyRow>span:not(:first-child){font-variant-numeric:tabular-nums;text-align:right}
+.dailyHead>span:not(:first-child){text-align:right}.dailyRow small{font-size:11px;margin-top:4px}
+.dailyPair{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:20px 0}.dailyPair strong{display:block;margin-top:8px;font-size:20px;overflow-wrap:anywhere}
+.combinedGrid{display:grid;gap:17px;align-items:start}
+@media(min-width:760px){.combinedDrawer{width:min(760px,100%)}.combinedGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.dailyHead,.shell .dailyRow{grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 16px;gap:18px;padding:16px 20px}.dailyRow>span{font-size:14px}}

@@ -7,7 +7,7 @@ const source = fs.readFileSync(new URL('../src/app/finance/loadFinanceView.ts', 
 const compiled = { exports: {} };
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: compiled.exports });
 const { loadFinanceView } = compiled.exports;
-for (const [name, compact, mode, expected] of [['overview', true, 'summary', ['summary']], ['summary', false, 'summary', ['config', 'summary']], ['entries', false, 'entries', ['config', 'summary', 'entries']]]) {
+for (const [name, compact, mode, expected] of [['overview', true, 'summary', ['summary']], ['summary', false, 'summary', ['config', 'summary']], ['entries', false, 'entries', ['config', 'summary', 'daily-groups']]]) {
  test(`${name} fetches only required finance data`, async () => {
   const calls = []; const signal = new AbortController().signal;
   const result = await loadFinanceView(async (path, options) => {

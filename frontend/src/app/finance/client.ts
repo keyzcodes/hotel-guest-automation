@@ -18,3 +18,5 @@ export function today() {
 }
 export const money = (kobo: number | null | undefined) => kobo == null ? '—' : new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(kobo / 100);
 export const message = (error: unknown) => error instanceof Error ? error.message : 'Connection unavailable. Please retry.';
+
+export type DailyGroup = { businessDate: string; departmentId: string; salesKobo: number; expensesKobo: number; salesCount: number; expenseCount: number; voidCount: number };

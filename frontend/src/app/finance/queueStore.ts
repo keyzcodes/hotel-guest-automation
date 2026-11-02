@@ -27,5 +27,15 @@ export const queueStore: QueueStore = {
     return rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   },
   async put(item) { await transaction('readwrite', store => store.put(item)); },
+  async putMany(items) {
+    const db = await open();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('entries', 'readwrite');
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onabort = tx.onerror = () => { db.close(); reject(Error('Device storage failed. Neither entry has been queued.')); };
+      try { for (const item of items) tx.objectStore('entries').put(item); }
+      catch { tx.abort(); }
+    });
+  },
   async remove(id) { await transaction('readwrite', store => store.delete(id)); },
 };

@@ -1,11 +1,12 @@
 'use client';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useStaffAccess } from '../StaffAccess';
-import { enqueue, syncQueue, type QueueItem, type QueuedBody } from './offlineQueue';
+import { enqueue, enqueueBatch, syncQueue, type QueueItem, type QueuedBody } from './offlineQueue';
 import { queueStore } from './queueStore';
 
 type QueueContext = {
   items: QueueItem[]; error: string; save: (body: QueuedBody) => Promise<QueueItem>;
+  saveBatch: (bodies: QueuedBody[]) => Promise<QueueItem[]>;
   dismiss: (item: QueueItem) => Promise<void>;
 };
 const Context = createContext<QueueContext | null>(null);
@@ -77,10 +78,16 @@ export default function OfflineEntries({ children }: { children: React.ReactNode
     window.dispatchEvent(new Event('hotel-finance-queue'));
     return item;
   }
+  async function saveBatch(bodies: QueuedBody[]) {
+    const result = await enqueueBatch(queueStore, owner, bodies);
+    await refresh();
+    window.dispatchEvent(new Event('hotel-finance-queue'));
+    return result;
+  }
   async function dismiss(item: QueueItem) {
     if (item.owner !== owner || item.status === 'waiting') return;
     await queueStore.remove(item.id);
     await refresh();
   }
-  return <Context.Provider value={{ items, error, save, dismiss }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ items, error, save, saveBatch, dismiss }}>{children}</Context.Provider>;
 }

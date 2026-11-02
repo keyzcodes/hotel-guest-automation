@@ -10,6 +10,7 @@ export type QueueItem = {
 export type QueueStore = {
   list(owner: string): Promise<QueueItem[]>;
   put(item: QueueItem): Promise<void>;
+  putMany?(items: QueueItem[]): Promise<void>;
   remove(id: string): Promise<void>;
 };
 export function entryProblem(body: QueuedBody, config: { departments: { id: string; sales: boolean; categories: string[] }[] }, today: string) {
@@ -32,7 +33,7 @@ export async function enqueue(store: QueueStore, owner: string, body: QueuedBody
   const rows = await store.list(owner);
   const previous = rows.find(row => row.id === body.requestId);
   if (previous) {
-    if (JSON.stringify(previous.body) !== JSON.stringify(body)) throw Error('This save is already queued with different values. Review the original entry.');
+    if (['requestId', 'type', 'businessDate', 'departmentId', 'categoryId', 'amount', 'note'].some(field => previous.body[field as keyof QueuedBody] !== body[field as keyof QueuedBody])) throw Error('This save is already queued with different values. Review the original entry.');
     return previous;
   }
   if (rows.filter(row => row.status !== 'saved').length >= 100) throw Error('Sync or review your pending entries before adding more.');
@@ -62,4 +63,25 @@ export async function syncQueue(
     } else return;
     changed();
   }
+}
+
+// Stage the whole form before one IndexedDB transaction. No half-local batch.
+export async function enqueueBatch(store: QueueStore, owner: string, bodies: QueuedBody[]) {
+  if (!bodies.length || bodies.length > 2 || new Set(bodies.map(body => body.requestId)).size !== bodies.length)
+    throw Error('Choose one sales amount, one expense amount, or both.');
+  const current = await store.list(owner);
+  const staged = structuredClone(current);
+  const virtual: QueueStore = {
+    list: async () => staged,
+    put: async item => { staged.push(item); },
+    remove: async () => {},
+  };
+  const result: QueueItem[] = [];
+  for (const body of bodies) result.push(await enqueue(virtual, owner, body));
+  const added = result.filter(item => !current.some(row => row.id === item.id));
+  if (added.length) {
+    if (!store.putMany) throw Error('Device storage does not support combined saves.');
+    await store.putMany(added);
+  }
+  return result;
 }

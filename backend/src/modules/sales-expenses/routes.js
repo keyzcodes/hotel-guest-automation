@@ -4,6 +4,7 @@ const auth = require('../../services/staffAuthService');
 const validate = require('./validation');
 const { createService, publicEntry, matchRange, summaryPipeline, buildSummary } = require('./service');
 const Entries = require('./model');
+const { groupQuery, dailyPipeline, groupPage } = require('./dailyGroups');
 const service = createService(Entries);
 const router = express.Router();
 const idPattern = /^[a-f\d]{24}$/i;
@@ -35,6 +36,11 @@ router.get('/summary', handle(async (req, res) => {
   const range = validate.range(req.query);
   const grouped = await Entries.aggregate(summaryPipeline(range)).option({ maxTimeMS: 10000 });
   res.json({ success: true, data: buildSummary(range, grouped) });
+}));
+router.get('/daily-groups', handle(async (req, res) => {
+  const query = groupQuery(req.query);
+  const rows = await Entries.aggregate(dailyPipeline(query)).option({ maxTimeMS: 10000 });
+  res.json(groupPage(rows, query.limit));
 }));
 router.get('/entries', handle(async (req, res) => {
   const range = validate.range(req.query);
