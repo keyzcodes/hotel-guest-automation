@@ -6,7 +6,7 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 
 // Hosted services use their platform resolver. Retain the local ISP workaround.
-if (process.env.NODE_ENV !== "production") dns.setServers(["8.8.8.8", "8.8.4.4"]);
+if (process.env.NODE_ENV !== "production") { dns.setServers(["1.1.1.1", "8.8.8.8"]); dns.promises.setServers(["1.1.1.1", "8.8.8.8"]); }
 const staffAuth = require("./src/services/staffAuthService");
 const publicUrl = process.env.APP_PUBLIC_URL || process.env.RENDER_EXTERNAL_URL;
 if (publicUrl && !process.env.FRONTEND_ORIGINS) {
@@ -23,7 +23,7 @@ let ready = false;
 const messagingPolicy = require('./src/services/guestMessagingPolicy');
 const messagingEnabled = messagingPolicy.enabled();
 const transport = messagingEnabled
-  ? require('./src/services/telegramService').createTransport()
+  ? require(require('./src/services/guestChannel').whatsapp() ? './src/services/whatsappService' : './src/services/telegramService').createTransport()
   : { mount() {}, async start() {}, async stop() {} };
 // This one secret-verified route belongs to Telegram, not the staff API.
 transport.mount(app, () => ready && mongoose.connection.readyState === 1);
@@ -65,8 +65,13 @@ async function start() {
     if (res.headersSent) return next(error);
     res.status(500).json({ success: false, message: "Request could not be completed." });
   });
+  if (require('./src/services/guestChannel').whatsapp() &&
+      !/^mongodb(?:\+srv)?:\/\/[^/]+\/sesora_whatsapp_lab(?:\?|$)/.test(process.env.MONGO_URI)) {
+    throw Error('This WhatsApp integration is restricted to sesora_whatsapp_lab.');
+  }
   await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 15000 });
   console.log("Connected to MongoDB Atlas.");
+  await Promise.all([require("./src/models/Message").init(), require("./src/models/TaskTicket").init()]);
   await Promise.all([
     require("./src/models/StaffSession").init(),
     require("./src/models/StaffLoginAttempt").init(),
@@ -86,9 +91,9 @@ async function start() {
     httpServer.once("error", reject);
     httpServer.listen(port, "0.0.0.0", resolve);
   });
-  if (messagingEnabled) await require("./src/services/jobWorker").startJobWorker();
+  if (messagingEnabled && !require("./src/services/guestChannel").whatsapp()) await require("./src/services/jobWorker").startJobWorker();
   await transport.start(() => {
-    console.error("Telegram polling stopped; restarting the service is required.");
+    console.error("Guest messaging stopped; restarting the service is required.");
     void shutdown(1);
   });
   ready = true;

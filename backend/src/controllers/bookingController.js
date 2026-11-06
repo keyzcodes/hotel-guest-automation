@@ -1,3 +1,5 @@
+const channel = require('../services/guestChannel');
+const { normalizePhone, phoneJid } = require('../services/whatsappIdentity');
 const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
 const ScheduledJob = require('../models/ScheduledJob');
@@ -28,6 +30,14 @@ const checkInGuest = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
+    let whatsappJid = null;
+    if (channel.whatsapp()) {
+      whatsappJid = phoneJid(guestPhone);
+      if (!whatsappJid) return res.status(400).json({ success: false, message: 'Enter a valid guest WhatsApp number, including country code for non-Nigerian numbers.' });
+      if (await Booking.exists({ whatsappJid, stayStatus: { $in: ['ACTIVE', 'EXTENDED'] } })) {
+        return res.status(409).json({ success: false, message: 'This WhatsApp number already has an active stay. Ask reception to resolve the stay before checking in again.' });
+      }
+    }
     const checkInTime = new Date();
     const suppliedCheckout = req.body.checkOutTime;
 
@@ -53,8 +63,9 @@ const checkInGuest = async (req, res) => {
 
     const newBooking = await Booking.create({
       guestName,
-      guestPhone,
-      telegramChatId: telegramChatId || null,
+      guestPhone: whatsappJid ? normalizePhone(guestPhone) : guestPhone,
+      whatsappJid,
+      telegramChatId: channel.whatsapp() ? null : telegramChatId || null,
       roomNumber,
       stayPolicy: stayPolicy || 'TWENTY_FOUR_HOUR',
       checkInTime,
@@ -67,7 +78,7 @@ const checkInGuest = async (req, res) => {
       const timings = process.env.JOB_DEMO_MODE === 'true'
         ? { pulseDelayMs: 60000, checkoutReminderLeadMs: 60000, reminderDelayMs: 120000 }
         : {};
-      await scheduleCheckInJobs(newBooking, timings);
+      if (!channel.whatsapp()) await scheduleCheckInJobs(newBooking, timings);
     } catch (error) {
       automationScheduled = false;
       console.error('Booking saved but job scheduling failed:', error.name);
@@ -76,7 +87,8 @@ const checkInGuest = async (req, res) => {
       success: true,
       message: `Guest ${guestName} checked into Room ${roomNumber}!`,
       booking: newBooking,
-      automationScheduled,
+      automationScheduled: channel.whatsapp() ? false : automationScheduled,
+      requestMessagingReady: channel.whatsapp(),
     });
   } catch (error) {
     console.error('Check-In Error:', error);
@@ -179,7 +191,7 @@ const confirmCheckout = async (req, res) => {
     warnings.push('Reminder cleanup needs another attempt.');
   }
 
-  if (booking.telegramChatId) {
+  if (!channel.whatsapp() && booking.telegramChatId) {
     try {
       await ScheduledJob.init();
       await scheduleReviewJob(booking, booking.confirmedCheckoutAt);

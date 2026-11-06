@@ -12,7 +12,7 @@ async function recordAndReply(ctx, inbound, text, timing) {
   // Save before sending; do not automatically retry uncertain external sends.
   const outgoing = await measure("reply_record_create", () => Message.create({
     bookingId: inbound.bookingId || null,
-    channel: "TELEGRAM",
+    channel: ctx.channel || "TELEGRAM",
     chatId: inbound.chatId,
     direction: "OUTBOUND",
     sender: "SYSTEM",
@@ -145,12 +145,12 @@ async function processGuestMessage(ctx) {
   try {
     try {
       inbound = await timing.measure("inbound_save", () => Message.create({
-        channel: "TELEGRAM",
+        channel: ctx.channel || "TELEGRAM",
         chatId,
         direction: "INBOUND",
         text,
         providerMessageId: String(ctx.message.message_id),
-        idempotencyKey: `TELEGRAM:${chatId}:${ctx.message.message_id}`,
+        idempotencyKey: `${ctx.channel || "TELEGRAM"}:${chatId}:${ctx.message.message_id}`,
         processingStatus: "RECEIVED",
       }));
     } catch (error) {
@@ -158,10 +158,10 @@ async function processGuestMessage(ctx) {
       throw error;
     }
     const linked = await timing.measure("booking_lookup", () => Booking.find({
-      telegramChatId: chatId,
+      [ctx.channel === "WHATSAPP" ? "whatsappJid" : "telegramChatId"]: chatId,
       stayStatus: { $in: ["ACTIVE", "EXTENDED"] },
     }).limit(2));
-    if (linked.length !== 1) {
+    if (linked.length !== 1 || ctx.reviewOnly) {
       timing.setOutcome("unlinked_stay");
       await Message.updateOne(
         { _id: inbound._id },

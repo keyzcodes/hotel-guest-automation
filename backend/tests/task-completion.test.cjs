@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const path = require("node:path");
-function fixture(category = "Housekeeping", failure = false) {
+function fixture(category = "Housekeeping", failure = false, whatsapp = false) {
   let record,
     sends = 0;
   const ticket = {
@@ -17,6 +17,7 @@ function fixture(category = "Housekeeping", failure = false) {
     _id: "stay1",
     stayStatus: "ACTIVE",
     telegramChatId: "chat1",
+    whatsappJid: "2348012345678@s.whatsapp.net",
   };
   const dependencies = {
     "../models/TaskTicket": {
@@ -45,6 +46,12 @@ function fixture(category = "Housekeeping", failure = false) {
         return { message_id: 1 };
       },
     },
+  };
+  dependencies["./guestChannel"] = {
+    address: booking => whatsapp ? booking.whatsappJid : booking.telegramChatId,
+    field: () => whatsapp ? "whatsappJid" : "telegramChatId",
+    channel: () => whatsapp ? "WHATSAPP" : "TELEGRAM",
+    sendStaffReply: dependencies["./telegramService"].sendStaffReply
   };
   const context = {
     require: (name) => dependencies[name],
@@ -83,6 +90,15 @@ test("uncertain delivery keeps task complete and does not resend on retry", asyn
   const f = fixture("Housekeeping", true);
   assert.equal((await f.run("task1")).notificationState, "UNKNOWN");
   assert.equal(f.ticket.status, "Resolved");
+  await f.run("task1");
+  assert.equal(f.sends(), 1);
+});
+
+test("WhatsApp completion uses WhatsApp identity and never resends the same completion", async () => {
+  const f = fixture("Housekeeping", false, true);
+  assert.equal((await f.run("task1")).notificationState, "SENT");
+  assert.equal(f.message().channel, "WHATSAPP");
+  assert.equal(f.message().chatId, "2348012345678@s.whatsapp.net");
   await f.run("task1");
   assert.equal(f.sends(), 1);
 });

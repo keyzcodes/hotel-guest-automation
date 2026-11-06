@@ -12,6 +12,7 @@ const bookingSchema = new mongoose.Schema(
       required: [true, "Guest phone number is required"],
       trim: true,
     },
+    whatsappJid: { type: String, default: null, index: true },
     telegramChatId: {
       type: String,
       default: null, // Linked when guest scans QR code or taps /start in Telegram

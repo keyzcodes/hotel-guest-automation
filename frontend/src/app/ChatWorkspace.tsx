@@ -1,5 +1,6 @@
 "use client";
 import { apiFetch as fetch } from "./apiClient";
+import UnlinkedWhatsappMessages from "./UnlinkedWhatsappMessages";
 import { Fragment, useEffect, useRef, useState } from "react";
 import styles from "./chat.module.css";
 import attentionStyles from "./attention.module.css";
@@ -134,7 +135,7 @@ export default function ChatWorkspace({
 
   useEffect(() => {
     // Dismiss only confirmed success; keep errors and uncertain delivery visible.
-    const success = ["Request completed. Confirmation sent to Telegram.", "Review closed."];
+    const success = ["Request completed. Confirmation sent to WhatsApp.", "Review closed."];
     if (!success.includes(taskNotice)) return;
 
     const timer = window.setTimeout(() => {
@@ -354,11 +355,11 @@ export default function ChatWorkspace({
         setDraft("");
         pending.current = null;
         setUncertain(false);
-        setNotice("Sent to Telegram. Guest read status is unavailable.");
+        setNotice("Sent to WhatsApp. Guest read status is unavailable.");
       } else {
         setUncertain(true);
         setNotice(
-          "Delivery is pending or unconfirmed. Check Telegram. Checking status will not send another copy.",
+          "Delivery is pending or unconfirmed. Check WhatsApp. Checking status will not send another copy.",
         );
       }
       setReload((value) => value + 1);
@@ -440,6 +441,7 @@ export default function ChatWorkspace({
       <div className={styles.list}>
         <div className={styles.listHead}>
           <h2>Chats</h2>
+          <UnlinkedWhatsappMessages api={api} revision={revision} />
           <div className={styles.scopeTabs}>
             {(["Current", "History"] as const).map((value) => (
               <button
@@ -652,7 +654,7 @@ export default function ChatWorkspace({
                             message.sender === "STAFF" && (
                               <span>
                                 {message.deliveryState === "SENT"
-                                  ? "Sent to Telegram"
+                                  ? "Sent to WhatsApp"
                                   : message.deliveryState === "PENDING"
                                     ? "Pending send confirmation"
                                     : "Delivery unconfirmed"}

@@ -1,3 +1,4 @@
+const transport = require('../services/guestChannel');
 const express = require('express');
 const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
@@ -33,8 +34,8 @@ router.get('/', async (req, res) => {
       ], as: 'latest' } },
       { $set: { latestMessage: { $arrayElemAt: ['$latest', 0] }, canReply: { $and: [
         { $in: ['$stayStatus', ['ACTIVE', 'EXTENDED']] },
-        { $ne: [{ $ifNull: ['$telegramChatId', null] }, null] },
-        { $ne: ['$telegramChatId', ''] },
+        { $ne: [{ $ifNull: ['$' + transport.field(), null] }, null] },
+        { $ne: ['$' + transport.field(), ''] },
       ] }, lastActivity: { $ifNull: [{ $arrayElemAt: ['$latest.createdAt', 0] }, '$createdAt'] } } },
       { $sort: scope === 'Current' ? { needsReplyCount: -1, unreadCount: -1, lastActivity: -1, _id: -1 } : { lastActivity: -1, _id: -1 } }, { $limit: limit + 1 },
       { $project: { guestRating: 1, guestRatedAt: 1, guestName: 1, roomNumber: 1, stayStatus: 1, checkInTime: 1, checkOutTime: 1, unreadCount: 1, needsReplyCount: 1, latestMessage: 1, canReply: 1, lastActivity: 1 } },
@@ -43,6 +44,36 @@ router.get('/', async (req, res) => {
   } catch (error) {
     console.error('Conversation list failed:', error.message);
     res.status(500).json({ success: false, message: 'Could not load conversations.' });
+  }
+});
+// Unlinked messages remain visible without assigning a room or creating work.
+router.get('/unlinked', async (req, res) => {
+  try {
+    const messages = await Message.find({ channel: 'WHATSAPP', bookingId: null, direction: 'INBOUND' })
+      .select('_id chatId text createdAt').sort({ createdAt: -1, _id: -1 }).limit(50).lean();
+    res.json({ success: true, messages });
+  } catch {
+    res.status(500).json({ success: false, message: 'Could not load unlinked messages.' });
+  }
+});
+router.post('/unlinked/:messageId/link', async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { bookingId } = req.body || {};
+    if (!mongoose.isObjectIdOrHexString(messageId) || !mongoose.isObjectIdOrHexString(bookingId))
+      return res.status(400).json({ success: false, message: 'Choose a valid message and stay.' });
+    const inbound = await Message.findOne({ _id: messageId, channel: 'WHATSAPP', direction: 'INBOUND', bookingId: null });
+    if (!inbound) return res.status(409).json({ success: false, message: 'Message is already linked or unavailable. Refresh.' });
+    const booking = await Booking.findById(bookingId);
+    if (!booking || !['ACTIVE', 'EXTENDED'].includes(booking.stayStatus) || !booking.whatsappJid || booking.whatsappJid !== inbound.chatId)
+      return res.status(409).json({ success: false, message: 'The sender must match the WhatsApp number recorded on an active stay. Verify the guest at reception first.' });
+    const owners = await Booking.find({ whatsappJid: inbound.chatId, stayStatus: { $in: ['ACTIVE', 'EXTENDED'] } }).select('_id').limit(2);
+    if (owners.length !== 1) return res.status(409).json({ success: false, message: 'This number has multiple active stays. Resolve them first.' });
+    await Message.updateMany({ channel: 'WHATSAPP', bookingId: null, chatId: inbound.chatId, direction: 'INBOUND' },
+      { $set: { bookingId: booking._id, processingStatus: 'NEEDS_STAFF', aiAction: 'HANDOFF' } });
+    res.json({ success: true, message: 'Messages linked for staff review. No requests or automatic replies were created.' });
+  } catch {
+    res.status(500).json({ success: false, message: 'Link could not be confirmed. Refresh before retrying.' });
   }
 });
 router.get('/:bookingId/messages', async (req, res) => {
@@ -93,13 +124,13 @@ router.post('/:bookingId/reply', async (req, res) => {
     }
     const booking = await Booking.findById(bookingId);
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found.' });
-    if (!['ACTIVE', 'EXTENDED'].includes(booking.stayStatus) || !booking.telegramChatId) return res.status(409).json({ success: false, message: 'This stay is closed or has no linked Telegram chat.' });
-    const linked = await Booking.find({ telegramChatId: booking.telegramChatId, stayStatus: { $in: ['ACTIVE', 'EXTENDED'] } }).select('_id').limit(2);
-    if (linked.length !== 1 || String(linked[0]._id) !== bookingId) return res.status(409).json({ success: false, message: 'Telegram chat is linked ambiguously. Resolve the bookings before replying.' });
+    if (!['ACTIVE', 'EXTENDED'].includes(booking.stayStatus) || !transport.address(booking)) return res.status(409).json({ success: false, message: 'This stay is closed or has no linked guest chat chat.' });
+    const linked = await Booking.find({ [transport.field()]: transport.address(booking), stayStatus: { $in: ['ACTIVE', 'EXTENDED'] } }).select('_id').limit(2);
+    if (linked.length !== 1 || String(linked[0]._id) !== bookingId) return res.status(409).json({ success: false, message: 'guest chat chat is linked ambiguously. Resolve the bookings before replying.' });
     const latestInbound = await Message.findOne({ bookingId, direction: 'INBOUND' }).sort({ createdAt: -1, _id: -1 }).select('_id createdAt').lean();
     const staffReplyThrough = latestInbound ? { messageId: latestInbound._id, createdAt: latestInbound.createdAt } : undefined;
     try {
-      message = await Message.create({ bookingId, channel: 'TELEGRAM', chatId: booking.telegramChatId, direction: 'OUTBOUND', sender: 'STAFF', staffReplyThrough, text: text.trim(), idempotencyKey: key, processingStatus: 'NOT_APPLICABLE', deliveryState: 'PENDING' });
+      message = await Message.create({ bookingId, channel: transport.channel(), chatId: transport.address(booking), direction: 'OUTBOUND', sender: 'STAFF', staffReplyThrough, text: text.trim(), idempotencyKey: key, processingStatus: 'NOT_APPLICABLE', deliveryState: 'PENDING' });
     } catch (error) {
       if (error.code !== 11000) throw error;
       const duplicate = await Message.findOne({ idempotencyKey: key });
@@ -108,7 +139,7 @@ router.post('/:bookingId/reply', async (req, res) => {
       return res.json({ success: true, message: publicMessage(duplicate) });
     }
     // Persist first. Repeated HTTP requests with this key NEVER send again.
-    const sent = await require('../services/telegramService').sendStaffReply(booking.telegramChatId, message.text);
+    const sent = await transport.sendStaffReply(transport.address(booking), message.text);
     message.providerMessageId = String(sent.message_id);
     message.deliveryState = 'SENT';
     await message.save();
@@ -117,7 +148,7 @@ router.post('/:bookingId/reply', async (req, res) => {
   } catch (error) {
     console.error('Staff reply failed:', error.message);
     if (message) {
-      await Message.updateOne({ _id: message._id }, { $set: { deliveryState: 'UNKNOWN', lastError: 'Telegram send or delivery-record update could not be confirmed.' } }).catch(() => {});
+      await Message.updateOne({ _id: message._id }, { $set: { deliveryState: 'UNKNOWN', lastError: 'guest chat send or delivery-record update could not be confirmed.' } }).catch(() => {});
       return res.status(202).json({ success: true, message: { ...publicMessage(message), deliveryState: 'UNKNOWN' } });
     }
     return res.status(500).json({ success: false, message: 'Could not record the reply. Check the conversation before retrying.' });

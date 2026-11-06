@@ -6,7 +6,8 @@
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "dev:whatsapp": "node scripts/whatsapp-dev.mjs"
   },
   "dependencies": {
     "next": "16.4.4",

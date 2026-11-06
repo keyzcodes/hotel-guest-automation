@@ -28,7 +28,7 @@ type Booking = {
   checkOutTime: string;
   pulseCheckStatus: string;
   stayStatus: string;
-  telegramChatId?: string | null;
+  whatsappJid?: string | null;
 };
 type View = "Overview" | "Conversations" | "Requests" | "Stays";
 const API = "";
@@ -105,7 +105,6 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
     guestPhone: "",
     roomNumber: "",
     checkOutTime: "",
-    telegramChatId: "",
   });
   const refresh = useCallback(async (signal?: AbortSignal) => {
     if (refreshFlight.current) return refreshFlight.current;
@@ -440,15 +439,6 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
   async function checkIn(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setNotice("");
-    if (
-      form.telegramChatId.trim() &&
-      bookings.some((b) => b.telegramChatId === form.telegramChatId.trim())
-    ) {
-      setNotice(
-        "This Telegram chat already has an active stay. Use the existing booking; another would make room matching ambiguous.",
-      );
-      return;
-    }
     const checkout = new Date(form.checkOutTime);
     if (!Number.isFinite(checkout.getTime()) || checkout <= new Date()) {
       setNotice("Choose a checkout time in the future.");
@@ -462,12 +452,12 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
         signal: AbortSignal.timeout(30000),
         body: JSON.stringify({
           ...form,
-          telegramChatId: form.telegramChatId.trim() || null,
           checkOutTime: checkout.toISOString(),
           stayPolicy: "TWENTY_FOUR_HOUR",
         }),
       });
       const data = await response.json();
+      if ((response.status === 400 || response.status === 409) && data.message) throw new Error(data.message);
       if (!response.ok || !data.success)
         throw new Error(
           "Check-in could not finish. Refresh active stays before retrying: a booking may already have been saved.",
@@ -477,7 +467,9 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
       setView("Stays");
       setShowForm(false);
       setNotice(
-        data.automationScheduled
+        data.requestMessagingReady
+          ? "Guest checked in. WhatsApp requests are ready."
+          : data.automationScheduled
           ? "Guest checked in. Welcome scheduled."
           : "Guest checked in. Messaging needs attention.",
       );
@@ -486,8 +478,7 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
         guestPhone: "",
         roomNumber: "",
         checkOutTime: "",
-        telegramChatId: "",
-      });
+          });
       void refresh();
     } catch (e) {
       setNotice(
@@ -1063,16 +1054,11 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
               {[
                 { key: "roomNumber", label: "Room number", type: "text" },
                 { key: "guestName", label: "Guest name", type: "text" },
-                { key: "guestPhone", label: "Phone number", type: "tel" },
+                { key: "guestPhone", label: "Guest WhatsApp number", type: "tel" },
                 {
                   key: "checkOutTime",
                   label: "Checkout time (your device timezone)",
                   type: "datetime-local",
-                },
-                {
-                  key: "telegramChatId",
-                  label: "Telegram chat ID (optional)",
-                  type: "text",
                 },
               ].map((f) => {
                 const field = (
@@ -1080,7 +1066,7 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
                     {f.label}
                     <input
                       type={f.type}
-                      required={f.key !== "telegramChatId"}
+                      required
                       value={form[f.key as keyof typeof form]}
                       onChange={(e) => {
                         const value = e.target.value;
@@ -1105,19 +1091,11 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
                     />
                   </label>
                 );
-                return f.key === "telegramChatId" ? (
-                  <details key={f.key} className={styles.demoConnection}>
-                    <summary>Guest messaging</summary>
-                    {field}
-                  </details>
-                ) : (
-                  field
-                );
+                return field;
               })}
               <p className={styles.panelNote}>
-                Telegram requires the guest to start the bot first. Use only one
-                active stay per chat. Leaving the chat ID empty records a stay
-                without Telegram messages.
+                Use the number the guest will message from. Nigerian numbers may
+                start with 0 or +234; include the country code for other countries.
               </p>
               {notice && (
                 <div
