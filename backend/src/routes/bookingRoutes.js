@@ -7,7 +7,7 @@ const {
   confirmCheckout,
 } = require('../controllers/bookingController');
 
-router.post('/check-in', checkInGuest);
+router.post('/check-in', require('./reservationRoutes').loadReservationForCheckIn, checkInGuest);
 router.get('/active', getActiveBookings);
 router.get('/feedback', require('../services/guestFeedbackService').getGuestFeedback);
 router.post('/:id/checkout', confirmCheckout);

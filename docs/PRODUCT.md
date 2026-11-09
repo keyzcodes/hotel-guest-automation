@@ -2,6 +2,8 @@
 
 Recorded 7 October 2026.
 
+For the planned premium hotel and serviced-apartment PMS, see [PMS foundation](PMS_FOUNDATION.md). This page records the original product agreement.
+
 ## Purpose
 Reduce front-desk repetitive work, forgotten guest requests, and unresolved guest problems. Sell a lightweight standalone product to hotels in Nigeria without assuming their PMS has an API. The first hotel has not been interviewed: only its exterior/name was photographed. No hotel operations or service facts are verified.
 

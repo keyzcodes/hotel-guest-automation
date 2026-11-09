@@ -1,0 +1,84 @@
+.layout {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.panel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+}
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dates, .panel label, .arrival {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.panel label {
+  font-weight: 600;
+}
+.panel label input, .panel label select {
+  min-width: 0;
+  max-width: 100%;
+  font-size: 16px;
+  font-weight: 400;
+}
+.panel p, .arrival p {
+  margin: 0;
+}
+.panel button.primary {
+  background: var(--blue);
+  color: var(--surface);
+  border-color: var(--blue);
+  font-weight: 600;
+}
+.panel button.primary:hover {
+  filter: brightness(.92);
+}
+.arrival {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.actions button:disabled:not([aria-busy="true"]) {
+  cursor: default;
+}
+.actions {
+  display: grid;
+  gap: 8px;
+}
+.status {
+  background: var(--wash);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+@media (min-width: 580px) {
+  .dates {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .panel > button {
+    justify-self: start;
+  }
+}
+@media (min-width: 900px) and (max-width: 1049px), (min-width: 1160px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}

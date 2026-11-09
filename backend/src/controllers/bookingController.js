@@ -61,7 +61,7 @@ const checkInGuest = async (req, res) => {
       });
     }
 
-    const newBooking = await Booking.create({
+    const bookingData = {
       guestName,
       guestPhone: whatsappJid ? normalizePhone(guestPhone) : guestPhone,
       whatsappJid,
@@ -71,7 +71,10 @@ const checkInGuest = async (req, res) => {
       checkInTime,
       checkOutTime,
       stayStatus: 'ACTIVE',
-    });
+    };
+    const newBooking = process.env.ROOM_BOARD_ENABLED === 'true'
+      ? await require('../services/roomInventory').checkIn(bookingData, req.reservationId)
+      : await Booking.create(bookingData);
 
     let automationScheduled = true;
     try {
@@ -79,6 +82,7 @@ const checkInGuest = async (req, res) => {
         ? { pulseDelayMs: 60000, checkoutReminderLeadMs: 60000, reminderDelayMs: 120000 }
         : {};
       if (!channel.whatsapp()) await scheduleCheckInJobs(newBooking, timings);
+      else automationScheduled = await require('../services/whatsappStayMessages').schedule(newBooking);
     } catch (error) {
       automationScheduled = false;
       console.error('Booking saved but job scheduling failed:', error.name);
@@ -87,10 +91,13 @@ const checkInGuest = async (req, res) => {
       success: true,
       message: `Guest ${guestName} checked into Room ${roomNumber}!`,
       booking: newBooking,
-      automationScheduled: channel.whatsapp() ? false : automationScheduled,
+      automationScheduled,
       requestMessagingReady: channel.whatsapp(),
     });
   } catch (error) {
+    if (error.name === 'RoomConflict') {
+      return res.status(409).json({ success: false, message: error.message });
+    }
     console.error('Check-In Error:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -123,7 +130,9 @@ const confirmCheckout = async (req, res) => {
 
   try {
     // Only the first successful confirmation sets the departure timestamp.
-    booking = await Booking.findOneAndUpdate(
+    booking = process.env.ROOM_BOARD_ENABLED === 'true'
+      ? await require('../services/roomInventory').checkOut(id)
+      : await Booking.findOneAndUpdate(
       {
         _id: id,
         stayStatus: { $in: ['ACTIVE', 'EXTENDED'] },

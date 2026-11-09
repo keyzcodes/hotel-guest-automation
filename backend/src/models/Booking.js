@@ -17,6 +17,7 @@ const bookingSchema = new mongoose.Schema(
       type: String,
       default: null, // Linked when guest scans QR code or taps /start in Telegram
     },
+    roomId: { type: mongoose.Schema.Types.ObjectId, ref: "Room", default: null },
     roomNumber: {
       type: String,
       required: [true, "Room number is required"],

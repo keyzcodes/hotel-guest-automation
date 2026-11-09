@@ -147,4 +147,4 @@ function createTransport() {
     }
   };
 }
-module.exports = { createTransport, sendStaffReply };
+module.exports = { createTransport, sendStaffReply, isConnected: () => connected };

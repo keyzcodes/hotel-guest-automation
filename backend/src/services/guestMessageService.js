@@ -161,14 +161,37 @@ async function processGuestMessage(ctx) {
       [ctx.channel === "WHATSAPP" ? "whatsappJid" : "telegramChatId"]: chatId,
       stayStatus: { $in: ["ACTIVE", "EXTENDED"] },
     }).limit(2));
+    if (linked.length === 0 && !ctx.reviewOnly && ctx.channel === "WHATSAPP" &&
+        process.env.WHATSAPP_AVAILABILITY_ENABLED === "true" && process.env.ROOM_BOARD_ENABLED === "true" &&
+        text.length <= 4000) {
+      const { answerAvailability, datePrompt } = require("./whatsappAvailability");
+      const previous = await Message.findOne({
+        channel: "WHATSAPP",
+        chatId,
+        bookingId: null,
+        direction: "OUTBOUND",
+        deliveryState: "SENT",
+        createdAt: { $gte: new Date(Date.now() - 30 * 60000) },
+      }).sort({ createdAt: -1, _id: -1 }).select("text").lean();
+      const outcome = await timing.measure("availability_enquiry", () => answerAvailability({
+        text,
+        awaitingDates: previous?.text?.endsWith(datePrompt) === true,
+      }));
+      if (outcome) {
+        inbound.aiAction = outcome.action;
+        inbound.processingStatus = outcome.action === "HANDOFF" ? "NEEDS_STAFF" : "PROCESSED";
+        await inbound.save();
+        await reply(ctx, inbound, outcome.reply);
+        return;
+      }
+    }
     if (linked.length !== 1 || ctx.reviewOnly) {
       timing.setOutcome("unlinked_stay");
       await Message.updateOne(
         { _id: inbound._id },
         { $set: { processingStatus: "NEEDS_STAFF" } },
       );
-      // No active stay: keep this message unassigned and do not start AI,
-      // service requests or automatic guest replies. Never reopen a past stay.
+      // Other unlinked messages stay visible for reception review.
       return;
     }
     booking = linked[0];

@@ -36,6 +36,8 @@ if (require('./src/modules/sales-expenses/config').enabled()) {
   app.use("/api/finance", require("./src/modules/sales-expenses/routes"));
 }
 app.use("/api/bookings", require("./src/routes/bookingRoutes"));
+app.use("/api/rooms", require("./src/routes/roomRoutes"));
+app.use("/api/reservations", require("./src/routes/reservationRoutes").router);
 app.use("/api/tasks", require("./src/routes/taskRoutes"));
 app.use("/api/conversations", require("./src/routes/conversationRoutes"));
 // Unknown API paths must not fall through into Next.js's development proxy.
@@ -71,6 +73,10 @@ async function start() {
   }
   await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 15000 });
   console.log("Connected to MongoDB Atlas.");
+  if (process.env.ROOM_BOARD_ENABLED === "true") {
+    await Promise.all([require("./src/models/Room").init(), require("./src/models/Reservation").init()]);
+    await require("./src/services/demoRooms").seedDemoRooms(mongoose.connection.name);
+  }
   await Promise.all([require("./src/models/Message").init(), require("./src/models/TaskTicket").init()]);
   await Promise.all([
     require("./src/models/StaffSession").init(),
@@ -96,6 +102,9 @@ async function start() {
     console.error("Guest messaging stopped; restarting the service is required.");
     void shutdown(1);
   });
+  if (messagingEnabled && require('./src/services/guestChannel').whatsapp()) {
+    await require('./src/services/whatsappStayMessages').start();
+  }
   ready = true;
   console.log(`Hotel service is listening on port ${port}.`);
 }
@@ -108,6 +117,7 @@ async function shutdown(code = 0) {
   const deadline = setTimeout(() => process.exit(code || 1), 25000);
   deadline.unref();
   try {
+    await require('./src/services/whatsappStayMessages').stop();
     await transport.stop();
     await require("./src/services/realtimeService").closeRealtime();
     if (httpServer.listening) await new Promise(resolve => httpServer.close(resolve));
