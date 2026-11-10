@@ -28,3 +28,42 @@
   .composer textarea{font-size:16px;min-width:0}.workspace .composer button{padding:10px 12px;flex-shrink:0}
   .notice{padding:6px;font-size:11px}
 }
+
+.inboxSection {
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.inboxSection summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+
+.inboxCards {
+  display: grid;
+  gap: 8px;
+  max-height: min(45dvh, 360px);
+  overflow: auto;
+  padding-block: 4px;
+}
+
+.inboxCards span {
+  color: var(--muted);
+}
+
+.bookingDecisionActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.bookingDecisionQuestion {
+  display: block;
+  width: 100%;
+  min-height: 4rem;
+  margin-block: 0.35rem;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  resize: vertical;
+}

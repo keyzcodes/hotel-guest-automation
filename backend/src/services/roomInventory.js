@@ -31,9 +31,9 @@ async function availableRooms(dates) {
   }, { readConcern: { level: 'snapshot' } });
 }
 
-async function reserve(data) {
-  return mongoose.connection.transaction(async session => {
-    const room = await Room.findOne({ _id: data.roomId, outOfOrder: false }).session(session);
+async function reserve(data, { session: existingSession, category } = {}) {
+  const allocate = async session => {
+    const room = await Room.findOne({ _id: data.roomId, outOfOrder: false, ...(category ? { category } : {}) }).session(session);
     if (!room) throw new RoomConflict('This room is unavailable. Check availability again.');
     const { arrivalAt, departureAt } = data;
     const held = await reservedRooms({ arrivalAt, departureAt }, session);
@@ -50,7 +50,8 @@ async function reserve(data) {
     }, { session });
     if (!locked.matchedCount) throw new RoomConflict('The room changed. Check availability again.');
     return new Reservation({ ...data, roomNumber: room.number }).save({ session });
-  });
+  };
+  return existingSession ? allocate(existingSession) : mongoose.connection.transaction(allocate);
 }
 
 async function cancelReservation(id) {

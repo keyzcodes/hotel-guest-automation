@@ -4,6 +4,9 @@ const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
 const Message = require('../models/Message');
 const router = express.Router();
+const { enquiryMatches, groupBookingEnquiries } = require('../services/bookingEnquiryInbox');
+const unlinkedInbound = { channel: 'WHATSAPP', bookingId: null, direction: 'INBOUND', bookingWorkflowHandled: { $ne: true } };
+const guestMatching = { $nor: enquiryMatches, processingStatus: { $ne: 'PROCESSED' } };
 const { unreadFilter, acknowledgeReply, attentionLookup } = require('../services/conversationAttentionService');
 const reconcileReply = reply => acknowledgeReply(Message, reply).catch(error => console.error('Reply attention update failed:', error.name));
 const fields = '_id direction text channel sender deliveryState processingStatus createdAt staffReadAt';
@@ -49,11 +52,39 @@ router.get('/', async (req, res) => {
 // Unlinked messages remain visible without assigning a room or creating work.
 router.get('/unlinked', async (req, res) => {
   try {
-    const messages = await Message.find({ channel: 'WHATSAPP', bookingId: null, direction: 'INBOUND' })
-      .select('_id chatId text createdAt').sort({ createdAt: -1, _id: -1 }).limit(50).lean();
-    res.json({ success: true, messages });
+    const recent = (filter, fields) => Message.find({ ...unlinkedInbound, ...filter })
+      .select(fields).sort({ createdAt: -1, _id: -1 }).limit(50).lean();
+    const [messages, enquiries] = await Promise.all([
+      recent(guestMatching, '_id chatId text createdAt bookingHandoff'),
+      recent({ $or: enquiryMatches }, '_id chatId text createdAt processingStatus bookingEnquiryDates'),
+    ]);
+    const bookingRequests = process.env.WHATSAPP_BOOKING_WORKFLOW_ENABLED === 'true'
+      ? await require('../services/bookingWorkflowService').inbox() : [];
+    res.json({ success: true, messages, enquiries: groupBookingEnquiries(enquiries), bookingRequests });
   } catch {
     res.status(500).json({ success: false, message: 'Could not load unlinked messages.' });
+  }
+});
+router.post('/booking-enquiries/:id/decision', async (req, res) => {
+  if (process.env.WHATSAPP_BOOKING_WORKFLOW_ENABLED !== 'true' || !require('../services/bookingWorkflowSettings').enabled()) {
+    return res.status(404).json({ success: false, message: 'Booking decisions are unavailable.' });
+  }
+  const { id } = req.params;
+  const { action, version, depositVerified } = req.body ?? {};
+  const question = typeof req.body?.question === 'string' ? req.body.question.trim() : '';
+  if (!mongoose.isObjectIdOrHexString(id) || !Number.isSafeInteger(version) || version < 0 ||
+      !['confirm', 'decline', 'ask'].includes(action) || (action === 'ask' && (!question || question.length > 1000))) {
+    return res.status(400).json({ success: false, message: 'Provide a valid enquiry and decision.' });
+  }
+  const { RoomConflict } = require('../services/roomInventory');
+  try {
+    await require('../services/bookingWorkflowService').decide({
+      id, action, version, depositVerified, question, actor: String(req.staffSession._id),
+    });
+    res.json({ success: true });
+  } catch (error) {
+    if (error instanceof RoomConflict) return res.status(409).json({ success: false, message: error.message });
+    throw error;
   }
 });
 router.post('/unlinked/:messageId/link', async (req, res) => {
@@ -62,14 +93,14 @@ router.post('/unlinked/:messageId/link', async (req, res) => {
     const { bookingId } = req.body || {};
     if (!mongoose.isObjectIdOrHexString(messageId) || !mongoose.isObjectIdOrHexString(bookingId))
       return res.status(400).json({ success: false, message: 'Choose a valid message and stay.' });
-    const inbound = await Message.findOne({ _id: messageId, channel: 'WHATSAPP', direction: 'INBOUND', bookingId: null });
+    const inbound = await Message.findOne({ ...unlinkedInbound, ...guestMatching, _id: messageId });
     if (!inbound) return res.status(409).json({ success: false, message: 'Message is already linked or unavailable. Refresh.' });
     const booking = await Booking.findById(bookingId);
     if (!booking || !['ACTIVE', 'EXTENDED'].includes(booking.stayStatus) || !booking.whatsappJid || booking.whatsappJid !== inbound.chatId)
       return res.status(409).json({ success: false, message: 'The sender must match the WhatsApp number recorded on an active stay. Verify the guest at reception first.' });
     const owners = await Booking.find({ whatsappJid: inbound.chatId, stayStatus: { $in: ['ACTIVE', 'EXTENDED'] } }).select('_id').limit(2);
     if (owners.length !== 1) return res.status(409).json({ success: false, message: 'This number has multiple active stays. Resolve them first.' });
-    await Message.updateMany({ channel: 'WHATSAPP', bookingId: null, chatId: inbound.chatId, direction: 'INBOUND' },
+    await Message.updateMany({ ...unlinkedInbound, ...guestMatching, chatId: inbound.chatId },
       { $set: { bookingId: booking._id, processingStatus: 'NEEDS_STAFF', aiAction: 'HANDOFF' } });
     res.json({ success: true, message: 'Messages linked for staff review. No requests or automatic replies were created.' });
   } catch {

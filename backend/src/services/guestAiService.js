@@ -1,3 +1,4 @@
+const { performance } = require('node:perf_hooks');
 // Reuse the SDK client while the key is unchanged. Never log the key.
 let cachedClient, cachedKey;
 function getClient(apiKey) {
@@ -7,13 +8,13 @@ function getClient(apiKey) {
   }
   return cachedClient;
 }
-function responseBudget() {
-  const configured = Number(process.env.AI_RESPONSE_TIMEOUT_MS);
+function responseBudget(setting, fallback) {
+  const configured = Number(setting);
   return Number.isFinite(configured) &&
     configured >= 1000 &&
     configured <= 20000
     ? Math.floor(configured)
-    : 8000;
+    : fallback;
 }
 // Bound the caller's entire wait, even if a provider ignores cancellation.
 // Late model output cannot execute a task: only validated returned decisions do.
@@ -140,9 +141,6 @@ async function interpretGuestMessage(
 ) {
   if (process.env.USE_MOCK_AI === "true" && !suppliedClient)
     return mockDecision(text);
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-  if (!suppliedClient && !apiKey) throw new Error("Gemini API key missing.");
-  const ai = suppliedClient || getClient(apiKey);
   // Language understanding belongs to the model; authority remains in backend validation.
   const instruction = [
     "You are the hotel guest conversation interpreter. Propose one action; trusted backend code executes it separately.",
@@ -205,34 +203,85 @@ async function interpretGuestMessage(
     })),
     latestGuestMessage: text,
   };
-  // One request: retries during overload previously prolonged the guest's wait.
-  // Explicitly disable SDK retries so they cannot multiply this waiting budget.
-  const timeoutMs = responseBudget();
+  const decision = await generateStructuredReply({ instruction, context, schema: decisionSchema(tickets) }, suppliedClient);
+  return validateDecision(decision, tickets);
+}
+
+function providerRetryDelay(error) {
+  const headers = error.response?.headers ?? error.headers;
+  const retryAfter = headers?.get?.('retry-after') ?? headers?.['retry-after'];
+  if (retryAfter !== undefined && retryAfter !== null) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+    const date = Date.parse(retryAfter);
+    if (Number.isFinite(date)) return Math.max(0, date - Date.now());
+  }
+  // The installed Google SDK exposes JSON error details in ApiError.message.
+  let details = error.details;
+  if (!Array.isArray(details)) {
+    try { details = JSON.parse(error.message)?.error?.details; } catch {}
+  }
+  const duration = details?.find?.(item => item['@type'] === 'type.googleapis.com/google.rpc.RetryInfo')?.retryDelay;
+  const match = typeof duration === 'string' && duration.match(/^(\d+(?:\.\d+)?)s$/);
+  return match ? Number(match[1]) * 1000 : 0;
+}
+
+async function generateGuestModelResponse({ model, contents, config, timeoutMs, maxRetries = 0 }, suppliedClient) {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!suppliedClient && !apiKey) throw new Error("Gemini API key missing.");
+  const ai = suppliedClient || getClient(apiKey);
+  const retries = Number.isInteger(maxRetries) && maxRetries >= 0 && maxRetries <= 2 ? maxRetries : 0;
+  const startedAt = performance.now();
   const controller =
     typeof AbortController === "function" ? new AbortController() : undefined;
-  const response = await withinDeadline(
-    () =>
-      ai.models.generateContent({
-        model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
-        contents: JSON.stringify(context),
-        config: {
-          systemInstruction: instruction,
-          responseMimeType: "application/json",
-          responseJsonSchema: decisionSchema(tickets),
-          ...(controller ? { abortSignal: controller.signal } : {}),
-          // Provider deadline must be at least 10 seconds.
-          // The separate local timer still limits our waiting time.
-          httpOptions: {
-            timeout: Math.max(10000, timeoutMs),
-            retryOptions: { attempts: 1 },
+  // A single outer timer covers requests and backoff, including SDKs that ignore abort.
+  return withinDeadline(async () => {
+    for (let attempt = 0; ; attempt++) {
+      const remainingMs = Math.max(1, Math.floor(timeoutMs - (performance.now() - startedAt)));
+      try {
+        return await ai.models.generateContent({
+          model, contents,
+          config: {
+            ...config,
+            ...(controller ? { abortSignal: controller.signal } : {}),
+            httpOptions: {
+              timeout: Math.max(10000, remainingMs),
+              // This wrapper owns retries. Disable additional SDK attempts.
+              retryOptions: { attempts: 1 },
+            },
           },
-        },
-      }),
+        });
+      } catch (error) {
+        const status = Number(error.status ?? error.statusCode ?? error.response?.status);
+        if (attempt >= retries || controller?.signal.aborted || ![429, 503, 504].includes(status)) throw error;
+        const delayMs = Math.ceil(Math.max(300 * 2 ** attempt + Math.random() * 100, providerRetryDelay(error)));
+        const remainingMs = Math.floor(timeoutMs - (performance.now() - startedAt));
+        // Leave at least a second for the next attempt instead of starting futile work.
+        if (delayMs + 1000 >= remainingMs) {
+          console.warn('GEMINI_RETRY_SKIPPED', JSON.stringify({ providerStatus: status, reason: 'budget', remainingMs }));
+          throw error;
+        }
+        console.warn('GEMINI_RETRY', JSON.stringify({ providerStatus: status, retry: attempt + 1, maxRetries: retries, delayMs, remainingMs }));
+        await require('node:timers/promises').setTimeout(delayMs, undefined,
+          controller ? { signal: controller.signal } : undefined);
+        if (controller?.signal.aborted) throw error;
+      }
+    }
+  }, timeoutMs, controller);
+}
+async function generateStructuredReply({
+  instruction, context, schema,
+  model = process.env.GEMINI_MODEL || "gemini-3.8-flash",
+  timeoutMs = responseBudget(process.env.AI_RESPONSE_TIMEOUT_MS, 8000),
+}, suppliedClient) {
+  const response = await generateGuestModelResponse({
+    model,
+    contents: JSON.stringify(context),
+    config: { systemInstruction: instruction, responseMimeType: "application/json", responseJsonSchema: schema },
     timeoutMs,
-    controller,
-  );
+  }, suppliedClient);
   if (typeof response?.text !== "string")
     throw new Error("Missing AI response text.");
-  return validateDecision(JSON.parse(response.text), tickets);
+  return JSON.parse(response.text);
 }
-module.exports = { interpretGuestMessage, validateDecision, mockDecision };
+module.exports = { interpretGuestMessage, validateDecision, mockDecision, generateStructuredReply, generateGuestModelResponse };

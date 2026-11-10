@@ -69,6 +69,43 @@ messageSchema.add({
 });
 
 messageSchema.add({
+  bookingEnquiry: { type: Boolean },
+  bookingWorkflowHandled: { type: Boolean },
+  availabilityContext: {
+    type: new mongoose.Schema({
+      arrivalDate: String,
+      departureDate: String,
+      guests: Number,
+      checkedCategories: [String],
+      requestedCategories: { type: [String], default: undefined },
+      mode: { type: String, enum: ['COMPARE', 'FIRST_AVAILABLE'] },
+    }, { _id: false }),
+    default: undefined,
+    select: false,
+  },
+  bookingHandoff: {
+    type: new mongoose.Schema({
+      state: String,
+      guestName: String,
+      arrivalDate: String,
+      departureDate: String,
+      guests: Number,
+      requestedNights: Number,
+      category: String,
+      quote: {
+        category: String,
+        totalMinor: Number,
+        depositMinor: Number,
+        currency: String,
+        expiresAt: Date,
+      },
+    }, { _id: false, minimize: false }),
+    default: undefined,
+  },
+  bookingEnquiryDates: {
+    arrivalAt: Date,
+    departureAt: Date,
+  },
   aiAction: { type: String, enum: ['ANSWER', 'CLARIFY', 'CREATE_REQUEST', 'FOLLOW_UP', 'STATUS', 'HANDOFF'], default: null },
   ticketId: { type: mongoose.Schema.Types.ObjectId, ref: 'TaskTicket', default: null },
 });

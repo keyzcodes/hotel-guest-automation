@@ -3,11 +3,11 @@ const Booking = require("../models/Booking");
 const TaskTicket = require("../models/TaskTicket");
 const hotel = require("../config/hotel");
 const { interpretGuestMessage, validateDecision } = require("./guestAiService");
-const { serviceFallback } = require("./guestFallbackService");
+const { greetingFallback, serviceFallback } = require("./guestFallbackService");
 
 const openStatuses = ["Pending", "In Progress", "Escalated"];
 async function recordAndReply(ctx, inbound, text, timing) {
-  // Time persistence and Telegram separately; keep uncertain-send behaviour unchanged.
+  // Time persistence and transport separately; keep uncertain-send behaviour unchanged.
   const measure = (stage, operation) => timing ? timing.measure(stage, operation) : operation();
   // Save before sending; do not automatically retry uncertain external sends.
   const outgoing = await measure("reply_record_create", () => Message.create({
@@ -22,7 +22,7 @@ async function recordAndReply(ctx, inbound, text, timing) {
     deliveryState: "PENDING",
   }));
   try {
-    const sent = await measure("telegram_send", () => ctx.reply(text));
+    const sent = await measure(ctx.channel === "WHATSAPP" ? "whatsapp_send" : "telegram_send", () => ctx.reply(text));
     outgoing.providerMessageId = String(sent.message_id);
     outgoing.deliveryState = "SENT";
     await measure("reply_record_confirm", () => outgoing.save());
@@ -140,8 +140,18 @@ async function processGuestMessage(ctx) {
     text = ctx.message.text;
   // Monotonic timings contain no guest text, phone number, chat ID, or API key.
   const timing = createResponseTiming();
-  const reply = (context, message, response) => recordAndReply(context, message, response, timing);
-  let inbound, booking;
+  let inbound, booking, activity;
+  const reply = async (context, message, response) => {
+    await activity?.finish();
+    return recordAndReply(context, message, response, timing);
+  };
+  const beginResponse = () => {
+    if (ctx.channel !== "WHATSAPP" || typeof ctx.setTyping !== "function") return;
+    activity = require("./whatsappResponseActivity").startResponseActivity({
+      setTyping: ctx.setTyping,
+      signal: ctx.activitySignal,
+    });
+  };
   try {
     try {
       inbound = await timing.measure("inbound_save", () => Message.create({
@@ -164,26 +174,50 @@ async function processGuestMessage(ctx) {
     if (linked.length === 0 && !ctx.reviewOnly && ctx.channel === "WHATSAPP" &&
         process.env.WHATSAPP_AVAILABILITY_ENABLED === "true" && process.env.ROOM_BOARD_ENABLED === "true" &&
         text.length <= 4000) {
-      const { answerAvailability, datePrompt } = require("./whatsappAvailability");
-      const previous = await Message.findOne({
+      beginResponse();
+      const { answerPreStay } = require("./preStayGuestService");
+      const { enquiryWindowMs } = require("./whatsappAvailability");
+      const availabilityDemo = process.env.WHATSAPP_AVAILABILITY_TOOL_DEMO === "true";
+      const history = await Message.find({
         channel: "WHATSAPP",
         chatId,
         bookingId: null,
-        direction: "OUTBOUND",
-        deliveryState: "SENT",
-        createdAt: { $gte: new Date(Date.now() - 30 * 60000) },
-      }).sort({ createdAt: -1, _id: -1 }).select("text").lean();
-      const outcome = await timing.measure("availability_enquiry", () => answerAvailability({
+        _id: { $ne: inbound._id },
+        createdAt: { $gte: new Date(Date.now() - enquiryWindowMs), $lte: inbound.createdAt },
+        $or: [{ direction: "INBOUND" }, { direction: "OUTBOUND", deliveryState: "SENT" }],
+      }).sort({ createdAt: -1, _id: -1 }).limit(12).select("direction text").lean();
+      const workflow = process.env.WHATSAPP_BOOKING_WORKFLOW_ENABLED === "true"
+        ? await require("./bookingWorkflowService").forGuest(chatId, text)
+        : undefined;
+      const lastAvailability = workflow && availabilityDemo ? await Message.findOne({
+        channel: "WHATSAPP", chatId, bookingId: null, direction: "INBOUND",
+        "availabilityContext.arrivalDate": { $exists: true },
+        _id: { $ne: inbound._id }, createdAt: { $lte: inbound.createdAt },
+      }).sort({ createdAt: -1, _id: -1 }).select("+availabilityContext").lean() : null;
+      const answer = workflow && availabilityDemo
+        ? require("./preStayAvailabilityTool").answerAvailabilityTurn : answerPreStay;
+      const outcome = await timing.measure("pre_stay_conversation", () => answer({
         text,
-        awaitingDates: previous?.text?.endsWith(datePrompt) === true,
+        hotel,
+        ...(workflow ? { workflow } : {}),
+        availabilityContext: lastAvailability?.availabilityContext,
+        history: history.reverse().map(message => ({ direction: message.direction, text: message.text.slice(0, 1000) })),
       }));
-      if (outcome) {
-        inbound.aiAction = outcome.action;
-        inbound.processingStatus = outcome.action === "HANDOFF" ? "NEEDS_STAFF" : "PROCESSED";
-        await inbound.save();
-        await reply(ctx, inbound, outcome.reply);
-        return;
+      const needsStaff = outcome.action === "HANDOFF" &&
+        !(outcome.fallback && greetingFallback(text));
+      if (outcome.fallback) {
+        timing.setOutcome("pre_stay_ai_fallback");
+        if (workflow && needsStaff) inbound.bookingHandoff = workflow.staffContext;
       }
+      inbound.bookingEnquiry = outcome.bookingEnquiry;
+      if (outcome.workflowHandled) inbound.bookingWorkflowHandled = true;
+      if (outcome.dates) inbound.bookingEnquiryDates = outcome.dates;
+      if (outcome.availabilityContext) inbound.availabilityContext = outcome.availabilityContext;
+      inbound.aiAction = outcome.action === "HANDOFF" && !needsStaff ? "ANSWER" : outcome.action;
+      inbound.processingStatus = needsStaff ? "NEEDS_STAFF" : "PROCESSED";
+      await inbound.save();
+      await reply(ctx, inbound, outcome.reply);
+      return;
     }
     if (linked.length !== 1 || ctx.reviewOnly) {
       timing.setOutcome("unlinked_stay");
@@ -196,6 +230,7 @@ async function processGuestMessage(ctx) {
     }
     booking = linked[0];
     inbound.bookingId = booking._id;
+    beginResponse();
     inbound.processingStatus = "PROCESSING";
     await timing.measure("booking_link_save", () => inbound.save());
 
@@ -466,6 +501,7 @@ async function processGuestMessage(ctx) {
         : "Please contact the front desk so we can assist you.",
     ).catch(() => {});
   } finally {
+    await activity?.finish();
     // Report every exit, including duplicates, extensions, and failed processing.
     timing.finish(inbound?._id);
   }

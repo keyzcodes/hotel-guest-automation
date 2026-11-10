@@ -78,6 +78,7 @@ async function start() {
     await require("./src/services/demoRooms").seedDemoRooms(mongoose.connection.name);
   }
   await Promise.all([require("./src/models/Message").init(), require("./src/models/TaskTicket").init()]);
+  await require("./src/services/bookingWorkflowSettings").initialize();
   await Promise.all([
     require("./src/models/StaffSession").init(),
     require("./src/models/StaffLoginAttempt").init(),
@@ -104,6 +105,7 @@ async function start() {
   });
   if (messagingEnabled && require('./src/services/guestChannel').whatsapp()) {
     await require('./src/services/whatsappStayMessages').start();
+    require('./src/services/bookingDecisionDelivery').start();
   }
   ready = true;
   console.log(`Hotel service is listening on port ${port}.`);
@@ -117,6 +119,7 @@ async function shutdown(code = 0) {
   const deadline = setTimeout(() => process.exit(code || 1), 25000);
   deadline.unref();
   try {
+    await require('./src/services/bookingDecisionDelivery').stop();
     await require('./src/services/whatsappStayMessages').stop();
     await transport.stop();
     await require("./src/services/realtimeService").closeRealtime();

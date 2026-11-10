@@ -34,6 +34,7 @@ try {
     FRONTEND_ORIGINS: "http://localhost:3002,http://127.0.0.1:3002",
     TRUST_PROXY: "0",
     WHATSAPP_SESSION_MONGO_URI: local.MONGO_URI,
+    WHATSAPP_RELINK_SESSION: String(process.argv.includes("--relink")),
   };
   delete env.APP_PUBLIC_URL;
   delete env.RENDER_EXTERNAL_URL;

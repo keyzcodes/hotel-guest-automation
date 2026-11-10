@@ -1,5 +1,6 @@
 const { randomUUID } = require('node:crypto');
 const { senderJid } = require('./whatsappIdentity');
+const { installWhatsAppSessionLogGuard } = require('./whatsappSessionLogGuard');
 let socket;
 let connected = false;
 function safeError(label, error) {
@@ -15,6 +16,10 @@ async function sendStaffReply(jid, text) {
 function createTransport() {
   let client, collection, state, codec, leaseTimer, reconnectTimer;
   let stopping = false, attempts = 0, pending = Promise.resolve(), inbound = Promise.resolve();
+  const activities = new Set();
+  const stopActivities = () => {
+    for (const controller of activities) controller.abort();
+  };
   const owner = randomUUID();
   const sessionId = 'business-test'; // Same lab session can be reused after stopping the standalone lab.
   const silent = { level: 'silent', child() { return this; }, trace(){}, debug(){}, info(){}, warn(){}, error(){}, fatal(){} };
@@ -34,10 +39,11 @@ function createTransport() {
   return {
     mount() {},
     async start(onFailure) {
+      installWhatsAppSessionLogGuard();
       const [{ default: makeWASocket, BufferJSON, DisconnectReason, initAuthCreds, proto }, { MongoClient }, qr, { sessionCodec }] = await Promise.all([
         import('@whiskeysockets/baileys'), import('mongodb'), import('qrcode-terminal'), import('./whatsappSessionCodec.mjs')
       ]);
-      fatal = () => { connected = false; onFailure(); };
+      fatal = () => { connected = false; stopActivities(); onFailure(); };
       const uri = process.env.WHATSAPP_SESSION_MONGO_URI;
       if (!/^mongodb(?:\+srv)?:\/\/[^/]+\/sesora_whatsapp_lab(?:\?|$)/.test(uri || '')) throw Error('Use a lab-only WHATSAPP_SESSION_MONGO_URI for sesora_whatsapp_lab.');
       codec = sessionCodec(process.env.WHATSAPP_SESSION_KEY, BufferJSON);
@@ -53,7 +59,12 @@ function createTransport() {
         { returnDocument: 'after' }
       );
       if (!saved) throw Error('WhatsApp session is in use. Stop the other integration process or wait 60 seconds.');
-      state = saved.blob ? codec.open(saved.blob) : { creds: initAuthCreds(), keys: {} };
+      const relink = process.env.WHATSAPP_RELINK_SESSION === 'true';
+      state = saved.blob && !relink ? codec.open(saved.blob) : { creds: initAuthCreds(), keys: {} };
+      if (relink) {
+        await save();
+        console.info('Started a fresh lab WhatsApp session. Scan the new QR code.');
+      }
       leaseTimer = setInterval(() => {
         pending = pending.then(async () => {
           const lease = await collection.updateOne({ _id: sessionId, owner }, { $set: { lockUntil: new Date(Date.now() + 60000) } });
@@ -101,6 +112,7 @@ function createTransport() {
           }
           if (connection === 'close') {
             connected = false;
+            stopActivities();
             const code = lastDisconnect?.error?.output?.statusCode;
             if ([DisconnectReason.loggedOut, DisconnectReason.connectionReplaced].includes(code) || ++attempts > 5) { fatal(); return; }
             reconnectTimer = setTimeout(() => { void pending.then(connect).catch(fatal); }, 2000);
@@ -123,13 +135,26 @@ function createTransport() {
               const text = typeof raw === 'string' && raw.trim() ? raw.slice(0, 8000) : '[Non-text message — please review in WhatsApp]';
               // Unresolved identities are saved for review and get no automatic response.
               const chatId = jid || message.key.remoteJid;
-              await require('./guestMessageService').processGuestMessage({
-                channel: 'WHATSAPP',
-                chat: { id: chatId },
-                message: { text, message_id: message.key.id },
-                reply: text => sendStaffReply(chatId, text),
-                reviewOnly: !jid || !raw
-              });
+              const activity = new AbortController();
+              activities.add(activity);
+              try {
+                await require('./guestMessageService').processGuestMessage({
+                  channel: 'WHATSAPP',
+                  chat: { id: chatId },
+                  message: { text, message_id: message.key.id },
+                  reply: text => sendStaffReply(chatId, text),
+                  setTyping: async typing => {
+                    if (connected && current === socket && !stopping && jid) {
+                      await current.sendPresenceUpdate(typing ? 'composing' : 'paused', jid);
+                    }
+                  },
+                  activitySignal: activity.signal,
+                  reviewOnly: !jid || !raw
+                });
+              } finally {
+                activity.abort();
+                activities.delete(activity);
+              }
             }).catch(error => { safeError('WhatsApp request processing failed:', error); });
           }
         });
@@ -138,6 +163,7 @@ function createTransport() {
     },
     async stop() {
       stopping = true; connected = false;
+      stopActivities();
       clearInterval(leaseTimer); clearTimeout(reconnectTimer);
       socket?.end();
       await inbound.catch(() => {});
