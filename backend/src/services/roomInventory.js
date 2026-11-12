@@ -100,11 +100,19 @@ async function checkOut(id) {
     const booking = await Booking.findOneAndUpdate({ _id: id, stayStatus: active }, {
       $set: { stayStatus: 'COMPLETED', confirmedCheckoutAt: new Date(), extensionPromptMessageId: null },
     }, { session, returnDocument: 'after', runValidators: true });
-    if (!booking?.roomId) return booking;
-    const released = await Room.updateOne({ _id: booking.roomId, activeBookingId: booking._id }, {
-      $set: { activeBookingId: null, housekeeping: 'DIRTY' }, $inc: { version: 1 },
-    }, { session });
-    if (!released.matchedCount) throw new RoomConflict('Room assignment could not be verified. Refresh before retrying.');
+    if (!booking) return booking;
+    if (booking.roomId) {
+      const released = await Room.updateOne({ _id: booking.roomId, activeBookingId: booking._id }, {
+        $set: { activeBookingId: null, housekeeping: 'DIRTY' }, $inc: { version: 1 },
+      }, { session });
+      if (!released.matchedCount) throw new RoomConflict('Room assignment could not be verified. Refresh before retrying.');
+    }
+    if (process.env.GUEST_CHANNEL === 'WHATSAPP' && process.env.WHATSAPP_STAY_MESSAGES_ENABLED === 'true') {
+      await require('./whatsappFarewell').queue(booking, session);
+    }
+    if (process.env.WHATSAPP_DEMO_GM_SUMMARY_ENABLED === 'true') {
+      await require('./demoGmSummary').queue(booking, session);
+    }
     return booking;
   });
 }

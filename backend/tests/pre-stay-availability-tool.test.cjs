@@ -92,8 +92,8 @@ test('date-only follow-ups preserve the saved party and category but recheck the
     },
   });
   assert.equal(lookups, 1);
-  assert.match(outcome.reply, /Junior Suite is available at ₦95,000 total for 1 night/);
-  assert.doesNotMatch(outcome.reply, /Standard/);
+  assert.match(outcome.reply, /Junior Suite is available at ₦95,000 total/);
+  assert.doesNotMatch(outcome.reply, /Standard is available|Standard isn’t available/);
   assert.equal(outcome.availabilityContext.guests, 1);
   assert.deepEqual(outcome.availabilityContext.requestedCategories, ['Junior Suite']);
 });
@@ -318,15 +318,15 @@ test('WhatsApp handler switches rooms after PMS changes and remembers the stay f
     await send('overlap', 'Junior Suite for one guest, overlapping dates');
     assert.match(replies[5], /Junior Suite isn’t available/);
     await send('date-change', 'How about the checkout day to the following day?');
-    assert.match(replies[6], /Junior Suite is available at ₦95,000 total for 1 night/);
-    assert.doesNotMatch(replies[6], /Standard|guest count/);
+    assert.match(replies[6], /Junior Suite is available at ₦95,000 total/);
+    assert.doesNotMatch(replies[6], /Standard is available|guest count/);
     assert.equal(modelCalls, 7);
     await send('explicit-overlap', 'Check Junior Suite from ' + overlapArrival + ' to ' + laterDeparture);
     assert.match(replies[7], /Junior Suite isn’t available/);
     const stored = await Message.findOne({ providerMessageId: 'explicit-overlap' }).select('+availabilityContext').lean();
     assert.equal(stored.availabilityContext.arrivalDate, overlapArrival);
     await send('explicit-date-change', 'How about ' + departureDate + ' to ' + laterDeparture + '?');
-    assert.match(replies[8], /Junior Suite is available at ₦95,000 total for 1 night/);
+    assert.match(replies[8], /Junior Suite is available at ₦95,000 total/);
     assert.equal(modelCalls, 9);
     // Move every saved snapshot beyond the history window and add enough chatter
     // to push it out of the twelve-message context before starting a fresh process.
@@ -371,4 +371,13 @@ test('WhatsApp handler switches rooms after PMS changes and remembers the stay f
     if (mongoose.connection.db?.databaseName === dbName) await mongoose.connection.db.dropDatabase();
     await mongoose.disconnect();
   }
+});
+
+test('availability presents calendar nights and the property policy hours', async () => {
+  const result = await answerAvailabilityTurn({text: guestText, history: [], workflow: {settings: {...settings, checkOutTime: '11:30'}}, now}, {
+    generate: async () => toolResponse({...args, mode: 'COMPARE'}),
+    lookup: async () => [{category: 'Imperial'}],
+  });
+  assert.match(result.reply, /21 Nov 2026 to 23 Nov 2026 \(2 nights\)/);
+  assert.match(result.reply, /Standard check-in 2:00 PM · Checkout 11:30 AM \(WAT\)/);
 });

@@ -9,7 +9,13 @@ const enabled = () => process.env.ROOM_BOARD_ENABLED === 'true';
 const lagosDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Lagos' });
 const iso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
-function readDates(source) {
+async function readDates(source) {
+  if (source?.arrivalDate !== undefined || source?.departureDate !== undefined) {
+    if (source.arrivalAt !== undefined || source.departureAt !== undefined) return null;
+    const policy = await require('../services/bookingWorkflowSettings').stayPolicy();
+    const range = require('../services/bookingWorkflow').stayRange(source, policy, new Date());
+    return range ? { arrivalAt: range.arrivalAt, departureAt: range.departureAt } : null;
+  }
   const { arrivalAt, departureAt } = source ?? {};
   if (![arrivalAt, departureAt].every(value => typeof value === 'string' && iso.test(value))) return null;
   const arrival = new Date(arrivalAt);
@@ -29,12 +35,12 @@ router.get('/', async (_req, res) => {
   res.json({ reservations: reservations.map(item => ({ ...item, canArrive: item.arrivalAt <= now })) });
 });
 router.get('/availability', async (req, res) => {
-  const dates = readDates(req.query);
-  if (!dates) return res.status(400).json({ message: 'Choose a valid arrival and a later departure in Lagos time.' });
+  const dates = await readDates(req.query);
+  if (!dates) return res.status(400).json({ message: 'Choose a valid arrival date and a later departure date.' });
   res.json({ rooms: await availableRooms(dates) });
 });
 router.post('/', async (req, res) => {
-  const dates = readDates(req.body);
+  const dates = await readDates(req.body);
   const { roomId } = req.body ?? {};
   const guestName = typeof req.body?.guestName === 'string' ? req.body.guestName.trim() : '';
   const guestPhone = normalizePhone(req.body?.guestPhone);

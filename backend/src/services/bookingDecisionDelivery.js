@@ -1,16 +1,25 @@
 const Message = require('../models/Message');
 const settings = require('./bookingWorkflowSettings');
 const transport = require('./whatsappService');
+const summaries = require('./demoGmSummary');
+const farewells = require('./whatsappFarewell');
 
-const queued = {
-  channel: 'WHATSAPP', direction: 'OUTBOUND',
-  idempotencyKey: { $regex: '^BOOKING_DECISION:' },
-  deliveryState: 'PENDING',
-};
+function queuedMessages() {
+  const kinds = [];
+  if (settings.enabled()) kinds.push('BOOKING_DECISION');
+  if (summaries.enabled()) kinds.push('DEMO_GM_SUMMARY');
+  if (farewells.enabled()) kinds.push('WHATSAPP_FAREWELL');
+  return kinds.length ? {
+    channel: 'WHATSAPP', direction: 'OUTBOUND', deliveryState: 'PENDING',
+    idempotencyKey: { $regex: '^(?:' + kinds.join('|') + '):' },
+  } : null;
+}
 let timer;
 let running;
 
 async function tick() {
+  const queued = queuedMessages();
+  if (!queued) return;
   // An expired claim may have reached WhatsApp. Surface it for staff review.
   await Message.updateMany({
     ...queued, processingStatus: 'PROCESSING', updatedAt: { $lt: new Date(Date.now() - 120000) },
@@ -33,10 +42,13 @@ async function tick() {
     await Message.updateOne({ _id: message._id, ...queued }, { $set: {
       processingStatus: 'NOT_APPLICABLE', deliveryState: 'SENT', providerMessageId: String(sent.message_id),
     } });
+    if (message.idempotencyKey.startsWith('DEMO_GM_SUMMARY:')) {
+      console.info('GM_DEMO_SUMMARY', JSON.stringify({ deliveryState: 'SENT' }));
+    }
   } catch {
     await Message.updateOne({ _id: message._id, ...queued }, { $set: {
       processingStatus: 'NOT_APPLICABLE', deliveryState: 'UNKNOWN',
-      lastError: 'WhatsApp submission could not be confirmed. Check the guest chat.',
+      lastError: 'WhatsApp submission could not be confirmed. Check the recipient chat.',
     } });
   } finally {
     clearTimeout(timeout);
@@ -44,7 +56,7 @@ async function tick() {
 }
 
 function start() {
-  if (timer || !settings.enabled()) return;
+  if (timer || !queuedMessages()) return;
   const poll = () => {
     if (!running) running = tick()
       .catch(error => console.error('Booking decision delivery failed:', error.name))

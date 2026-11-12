@@ -62,7 +62,7 @@ function fixture(initial = {}) {
   const mongoose = {connection:{transaction:async work => {const before=structuredClone([room,stays,reservations]);try{return await work(session);}catch(e){[room,stays,reservations]=before;throw e;}}}};
   const module={exports:{}};
   const deps={mongoose,'../models/Room':Room,'../models/Booking':Booking,'../models/Reservation':Reservation};
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/services/roomInventory.js'),'utf8'),{module,require:k=>deps[k]});
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/services/roomInventory.js'),'utf8'),{module,process:{env:{}},require:k=>deps[k]});
   return {service:module.exports,room:()=>room,stays:()=>stays,reservations:()=>reservations};
 }
 const today = new Date('2026-11-07T13:00:00Z');

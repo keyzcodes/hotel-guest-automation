@@ -9,6 +9,7 @@ import Reservations from "./Reservations";
 import RoomBoard, { roomState, type RoomRecord } from "./RoomBoard";
 import { useStaffAccess } from "./StaffAccess";
 import WorkspaceDialog from "./WorkspaceDialog";
+import StaySchedule, { watToday, watTomorrow } from "./StaySchedule";
 import roomStyles from "./rooms.module.css";
 import styles from "./dashboard.module.css";
 
@@ -83,7 +84,7 @@ function Icon({ name }: { name: string }) {
 }
 export default function GuestWorkspace({ embedded = false }: { embedded?: boolean }) {
   const { logout, signingOut, identity } = useStaffAccess();
-  const hotelName = identity?.hotelName || 'Kudu Demo';
+  const hotelName = identity?.hotelName || 'Hotel Demo';
   const refreshFlight = useRef<Promise<void> | null>(null);
   const [draftReady, setDraftReady] = useState(false);
   const [requestScope, setRequestScope] = useState("Current");
@@ -93,7 +94,7 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
   const [view, setView] = useState<View>("Overview");
   const [dark, setDark] = useState(false);
   const [showReservations, setShowReservations] = useState(false);
-  const [inventory, setInventory] = useState<{ enabled: boolean; rooms: RoomRecord[] } | null>(null);
+  const [inventory, setInventory] = useState<{ enabled: boolean; rooms: RoomRecord[]; stayPolicy?: {checkInTime: string; checkOutTime: string; checkInLabel: string; checkOutLabel: string} } | null>(null);
   const [inventoryError, setInventoryError] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -114,7 +115,7 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
     guestName: "",
     guestPhone: "",
     roomNumber: "",
-    checkOutTime: "",
+    checkOutDate: watTomorrow(),
   });
   const refresh = useCallback(async (signal?: AbortSignal) => {
     if (refreshFlight.current) return refreshFlight.current;
@@ -460,9 +461,8 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
     event.preventDefault();
     if (saving || (roomBoard && (inventoryError || !readyRooms.some(room => room.number === roomNumber)))) return;
     setNotice("");
-    const checkout = new Date(form.checkOutTime);
-    if (!Number.isFinite(checkout.getTime()) || checkout <= new Date()) {
-      setNotice("Choose a checkout time in the future.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(form.checkOutDate) || form.checkOutDate <= watToday()) {
+      setNotice("Choose a checkout date after the check-in date.");
       return;
     }
     setSaving(true);
@@ -474,7 +474,6 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
         body: JSON.stringify({
           ...form,
           roomNumber,
-          checkOutTime: checkout.toISOString(),
           stayPolicy: "TWENTY_FOUR_HOUR",
         }),
       });
@@ -499,7 +498,7 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
         guestName: "",
         guestPhone: "",
         roomNumber: "",
-        checkOutTime: "",
+        checkOutDate: watTomorrow(),
           });
       void refresh();
     } catch (e) {
@@ -522,11 +521,6 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
           { key: "roomNumber", label: "Room number", type: "text" },
           { key: "guestName", label: "Guest name", type: "text" },
           { key: "guestPhone", label: "Guest WhatsApp number", type: "tel" },
-          {
-            key: "checkOutTime",
-            label: "Checkout time (your device timezone)",
-            type: "datetime-local",
-          },
         ].filter(f => !roomNumber || f.key !== "roomNumber").map((f) => {
           const field = (
             <label key={f.key}>
@@ -538,28 +532,16 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
                 onChange={(e) => {
                   const value = e.target.value;
                   setForm((current) => ({ ...current, [f.key]: value }));
-
-                  if (f.key === "checkOutTime") {
-                    const checkout = new Date(value);
-
-                    if (
-                      Number.isFinite(checkout.getTime()) &&
-                      checkout > new Date()
-                    ) {
-                      setNotice((current) =>
-                        current ===
-                        "Choose a checkout time in the future."
-                          ? ""
-                          : current,
-                      );
-                    }
-                  }
                 }}
               />
             </label>
           );
           return field;
         })}
+        <StaySchedule departure={form.checkOutDate} onChange={checkOutDate => {
+          setForm(current => ({ ...current, checkOutDate }));
+          setNotice(current => current === "Choose a checkout date after the check-in date." ? "" : current);
+        }} policy={inventory?.stayPolicy} />
         <p className={styles.panelNote}>
           Use the number the guest will message from. Nigerian numbers may
           start with 0 or +234; include the country code for other countries.
@@ -569,7 +551,7 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
             role="status"
             className={styles.alert}
             style={
-              notice === "Choose a checkout time in the future."
+              notice === "Choose a checkout date after the check-in date."
                 ? {
                     color: "#991b1b",
                     backgroundColor: "#fef2f2",
@@ -608,7 +590,7 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
       {embedded && <nav className={styles.sectionNav} aria-label="Guest service sections">{nav}</nav>}
       <aside className={styles.sidebar}>
         <div className={styles.brand}>
-          <div className={styles.logo}>K</div>
+          <div className={styles.logo}>{hotelName[0]}</div>
           <div>
             <strong>{hotelName}</strong>
             <small>GUEST OPERATIONS</small>
@@ -1113,7 +1095,7 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
               <button aria-pressed={showReservations} onClick={() => setShowReservations(true)}>Reservations</button>
             </nav>
             <div hidden={!showReservations} style={{ marginTop: 12 }}>
-              <Reservations active={view === "Rooms" && showReservations} rooms={inventory.rooms} inventoryError={inventoryError} revision={revision} onCheckIn={() => {
+              <Reservations policy={inventory.stayPolicy} active={view === "Rooms" && showReservations} rooms={inventory.rooms} inventoryError={inventoryError} revision={revision} onCheckIn={() => {
                 setConversationTarget("");
                 setView("Stays");
                 setNotice("Guest checked in from the saved reservation.");

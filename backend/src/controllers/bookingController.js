@@ -50,9 +50,25 @@ const checkInGuest = async (req, res) => {
       });
     }
 
-    const checkOutTime = suppliedCheckout !== undefined
-      ? new Date(suppliedCheckout)
-      : calculateCheckOut(checkInTime, stayPolicy || 'TWENTY_FOUR_HOUR');
+    let checkOutTime;
+    if (req.body.checkOutDate !== undefined) {
+      if (suppliedCheckout !== undefined) {
+        return res.status(400).json({ success: false, message: 'Provide a checkout date or a checkout timestamp, not both.' });
+      }
+      const policy = await require('../services/bookingWorkflowSettings').stayPolicy();
+      const arrivalDate = require('../services/whatsappAvailability').lagosDay.format(checkInTime);
+      const range = require('../services/bookingWorkflow').stayRange({
+        arrivalDate, departureDate: req.body.checkOutDate,
+      }, policy, checkInTime);
+      if (!range) {
+        return res.status(400).json({ success: false, message: 'Choose a checkout date after the check-in date.' });
+      }
+      checkOutTime = range.departureAt;
+    } else {
+      checkOutTime = suppliedCheckout !== undefined
+        ? new Date(suppliedCheckout)
+        : calculateCheckOut(checkInTime, stayPolicy || 'TWENTY_FOUR_HOUR');
+    }
 
     if (!Number.isFinite(checkOutTime.getTime()) || checkOutTime <= checkInTime) {
       return res.status(400).json({

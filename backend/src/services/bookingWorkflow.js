@@ -31,6 +31,13 @@ function sameOffer(a, b) {
     +new Date(a.arrivalAt) === +new Date(b.arrivalAt) && +new Date(a.departureAt) === +new Date(b.departureAt);
 }
 
+function policyTime(value) {
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) throw Error('Invalid hotel policy hours.');
+  const [hour, minute] = value.split(':');
+  if (hour === '12' && minute === '00') return '12 noon';
+  return `${Number(hour) % 12 || 12}:${minute} ${Number(hour) >= 12 ? 'PM' : 'AM'}`;
+}
+
 function approvedQuote(settings, range, rate, now) {
   const totalMinor = rate.nightlyMinor * range.nights;
   const depositMinor = Math.round(totalMinor * settings.depositPercent / 100);
@@ -175,4 +182,4 @@ async function advance({ decision, current, settings, availableRooms, now, text 
   };
 }
 
-module.exports = { advance, stayRange, datesText, currentStatus, approvedQuote, describeStay };
+module.exports = { advance, stayRange, datesText, currentStatus, approvedQuote, describeStay, policyTime };

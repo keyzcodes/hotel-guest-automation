@@ -4,9 +4,11 @@
  * Replace them with hotel-approved details before a live pilot.
  */
 module.exports = {
-  name: 'Kudu Demo',
+  name: process.env.HOTEL_GUEST_NAME?.trim() || process.env.HOTEL_NAME?.trim() || 'Kudu Demo',
   city: 'Ogbomoso',
   timezone: 'Africa/Lagos',
+  checkInTime: '14:00',
+  checkOutTime: '12:00',
   isDemo: true,
 
   // A neutral demo must not direct reviews to a real hotel.

@@ -7,9 +7,10 @@ const router = express.Router();
 const enabled = () => process.env.ROOM_BOARD_ENABLED === 'true';
 
 router.get('/', async (req, res) => {
-  if (!enabled()) return res.json({ enabled: false, rooms: [] });
+  const stayPolicy = await require('../services/bookingWorkflowSettings').stayPolicy();
+  if (!enabled()) return res.json({ enabled: false, rooms: [], stayPolicy });
   const rooms = await Room.find().select('number category housekeeping outOfOrder activeBookingId version').sort({ number: 1 }).lean();
-  res.json({ enabled: true, rooms });
+  res.json({ enabled: true, rooms, stayPolicy });
 });
 router.use((req, res, next) => enabled() ? next() : res.status(404).json({ message: 'Room board is disabled.' }));
 

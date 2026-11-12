@@ -9,7 +9,20 @@ const enabled = () => process.env.WHATSAPP_BOOKING_WORKFLOW_ENABLED === 'true' &
   connection.name === 'sesora_whatsapp_lab';
 
 const settings = () => connection.db.collection('hotelSettings');
-const load = () => settings().findOne({ _id: hotelId });
+const load = async (options = {}) => {
+  const profile = await settings().findOne({ _id: hotelId }, options);
+  const guestName = process.env.HOTEL_GUEST_NAME?.trim();
+  return profile && guestName ? { ...profile, name: guestName } : profile;
+};
+
+async function stayPolicy() {
+  const profile = await load();
+  const hotel = require('../config/hotel');
+  const { policyTime } = require('./bookingWorkflow');
+  const checkInTime = profile?.checkInTime ?? hotel.checkInTime;
+  const checkOutTime = profile?.checkOutTime ?? hotel.checkOutTime;
+  return { checkInTime, checkOutTime, checkInLabel: policyTime(checkInTime), checkOutLabel: policyTime(checkOutTime) };
+}
 
 async function initialize() {
   if (!enabled()) return;
@@ -43,4 +56,4 @@ async function initialize() {
   }, { upsert: true });
 }
 
-module.exports = { hotelId, enabled, initialize, load };
+module.exports = { hotelId, enabled, initialize, load, stayPolicy };

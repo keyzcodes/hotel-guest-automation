@@ -79,6 +79,7 @@ async function start() {
   }
   await Promise.all([require("./src/models/Message").init(), require("./src/models/TaskTicket").init()]);
   await require("./src/services/bookingWorkflowSettings").initialize();
+  require("./src/services/demoGmSummary").initialize();
   await Promise.all([
     require("./src/models/StaffSession").init(),
     require("./src/models/StaffLoginAttempt").init(),

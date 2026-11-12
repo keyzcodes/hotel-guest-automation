@@ -88,7 +88,7 @@ test('encrypted session survives roundtrip and rejects wrong keys and modified c
   const tampered = Buffer.from(encrypted, 'base64'); tampered[30] ^= 1;
   assert.throws(() => codec.open(tampered.toString('base64')));
 });
-function checkinFixture(duplicate = false) {
+function checkinFixture(duplicate = false, policy = {checkInTime: '14:00', checkOutTime: '12:00'}) {
   const created = [], scheduled = [];
   const dependencies = {
     mongoose: {},
@@ -96,15 +96,18 @@ function checkinFixture(duplicate = false) {
     '../models/ScheduledJob': {},
     '../services/schedulingService': { scheduleCheckInJobs: async () => scheduled.push(true) },
     '../services/guestChannel': { whatsapp: () => true },
-    '../services/whatsappIdentity': require('../src/services/whatsappIdentity')
+    '../services/whatsappIdentity': require('../src/services/whatsappIdentity'),
+    '../services/bookingWorkflowSettings': { stayPolicy: async () => policy },
+    '../services/bookingWorkflow': require('../src/services/bookingWorkflow'),
+    '../services/whatsappAvailability': require('../src/services/whatsappAvailability'),
   };
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/controllers/bookingController.js'), 'utf8'), {
     module, require: name => dependencies[name], console, process: { env: {} }
   });
-  return { created, scheduled, async run(phone) {
+  return { created, scheduled, async run(phone, fields = {}) {
     const response = { code: 200, status(code) { this.code = code; return this; }, json(data) { this.data = data; return this; } };
-    await module.exports.checkInGuest({ body: { guestName: 'Test Guest', guestPhone: phone, roomNumber: '203', telegramChatId: 'old-chat', checkOutTime: new Date(Date.now()+86400000).toISOString() } }, response);
+    await module.exports.checkInGuest({ body: { guestName: 'Test Guest', guestPhone: phone, roomNumber: '203', telegramChatId: 'old-chat', checkOutTime: new Date(Date.now()+86400000).toISOString(), ...fields } }, response);
     return response;
   }};
 }
@@ -168,4 +171,16 @@ test('review-only and ambiguous messages do not start typing', async t => {
     assert.equal(f.presence.length, 0);
     assert.equal(f.replies.length, 0);
   }
+});
+
+test('calendar checkout dates apply configured WAT policy hours and preserve timestamp callers', async () => {
+  const f = checkinFixture(false, {checkInTime: '14:00', checkOutTime: '11:30'});
+  const response = await f.run('0801 234 5678', { checkOutTime: undefined, checkOutDate: '2099-11-12' });
+  assert.equal(response.code, 201);
+  assert.equal(f.created[0].checkOutTime.toISOString(), '2099-11-12T10:30:00.000Z');
+  const invalid = checkinFixture();
+  assert.equal((await invalid.run('0801 234 5678', {checkOutTime: undefined, checkOutDate: '2099-11-31'})).code, 400);
+  assert.equal(invalid.created.length, 0);
+  const conflicting = checkinFixture();
+  assert.equal((await conflicting.run('0801 234 5678', {checkOutDate: '2099-11-12'})).code, 400);
 });

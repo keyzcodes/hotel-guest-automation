@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { apiFetch } from "./apiClient";
 import { roomState, type RoomRecord } from "./RoomBoard";
 import styles from "./reservations.module.css";
+import StaySchedule, { watToday, watTomorrow } from "./StaySchedule";
 
 type AvailableRoom = Pick<RoomRecord, "_id" | "number" | "category">;
 type Reservation = {
@@ -17,9 +18,8 @@ type Reservation = {
 };
 
 const formatTime = new Intl.DateTimeFormat("en-NG", {
-  timeZone: "Africa/Lagos", dateStyle: "medium", timeStyle: "short",
+  timeZone: "Africa/Lagos", dateStyle: "medium", timeStyle: "short", hour12: true,
 });
-const toISO = (value: string) => new Date(value + "+01:00").toISOString();
 
 class RequestError extends Error {
   constructor(message: string, readonly status: number) {
@@ -38,18 +38,19 @@ async function request(path: string, init?: RequestInit) {
   return data;
 }
 
-export default function Reservations({ active, rooms, inventoryError, revision, onCheckIn }: {
+export default function Reservations({ active, rooms, inventoryError, revision, onCheckIn, policy }: {
   active: boolean;
   rooms: RoomRecord[];
   inventoryError: boolean;
   revision: number;
+  policy?: { checkInLabel: string; checkOutLabel: string };
   onCheckIn: () => void;
 }) {
   const [arrivals, setArrivals] = useState<Reservation[] | null>(null);
   const [listError, setListError] = useState("");
   const [reload, setReload] = useState(0);
-  const [arrival, setArrival] = useState("");
-  const [departure, setDeparture] = useState("");
+  const [arrival, setArrival] = useState(watToday());
+  const [departure, setDeparture] = useState(watTomorrow());
   const [options, setOptions] = useState<AvailableRoom[] | null>(null);
   const [roomId, setRoomId] = useState("");
   const [guestName, setGuestName] = useState("");
@@ -92,7 +93,7 @@ export default function Reservations({ active, rooms, inventoryError, revision, 
     }
     setBusy("availability");
     try {
-      const query = new URLSearchParams({ arrivalAt: toISO(arrival), departureAt: toISO(departure) });
+      const query = new URLSearchParams({ arrivalDate: arrival, departureDate: departure });
       const data = await request("/api/reservations/availability?" + query);
       setOptions(data.rooms);
     } catch (error) {
@@ -116,7 +117,7 @@ export default function Reservations({ active, rooms, inventoryError, revision, 
     try {
       const data = await request("/api/reservations", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId, guestName, guestPhone, arrivalAt: toISO(arrival), departureAt: toISO(departure) }),
+        body: JSON.stringify({ roomId, guestName, guestPhone, arrivalDate: arrival, departureDate: departure }),
       });
       setNotice("Reservation confirmed for Room " + data.reservation.roomNumber + ".");
       setGuestName("");
@@ -183,11 +184,10 @@ export default function Reservations({ active, rooms, inventoryError, revision, 
   return <div className={styles.layout}>
     <form className={styles.panel} onSubmit={save}>
       <h2>New reservation</h2>
-      <p>Enter the planned arrival and departure in Lagos time.</p>
-      <div className={styles.dates}>
-        <label>Arrival<input type="datetime-local" required value={arrival} disabled={!!busy} onChange={event => changeDate(setArrival, event.target.value)} /></label>
-        <label>Departure<input type="datetime-local" required value={departure} disabled={!!busy} onChange={event => changeDate(setDeparture, event.target.value)} /></label>
-      </div>
+      <p>Choose the planned arrival and departure dates.</p>
+      <StaySchedule arrival={arrival} departure={departure}
+        onArrivalChange={value => changeDate(setArrival, value)}
+        onChange={value => changeDate(setDeparture, value)} policy={policy} disabled={!!busy} />
       {options && options.length > 0 && <>
         <label>Available room<select required value={roomId} disabled={!!busy} onChange={event => setRoomId(event.target.value)}>
           <option value="">Choose a room</option>
@@ -196,7 +196,7 @@ export default function Reservations({ active, rooms, inventoryError, revision, 
         <label>Guest name<input required value={guestName} maxLength={100} autoComplete="name" disabled={!!busy} onChange={event => setGuestName(event.target.value)} /></label>
         <label>Guest phone<input required value={guestPhone} type="tel" maxLength={30} autoComplete="tel" disabled={!!busy} onChange={event => setGuestPhone(event.target.value)} /></label>
       </>}
-      {options?.length === 0 && <p role="status">No rooms are available for these times. Try different dates.</p>}
+      {options?.length === 0 && <p role="status">No rooms are available for these dates. Try different dates.</p>}
       {formError && <p role="alert">{formError}</p>}
       {notice && <p role="status">{notice}</p>}
       <button className={styles.primary} disabled={!!busy}>

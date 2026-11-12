@@ -9,6 +9,7 @@ function createService(deps = {}) {
   const messages = deps.messages || require("../models/Message");
   const transport = deps.transport || require("./whatsappService");
   const now = deps.now || (() => new Date());
+  const hotel = deps.hotel || require("../config/hotel");
   let timer,
     running,
     stopping = false;
@@ -101,10 +102,17 @@ function createService(deps = {}) {
             ? null
             : "Earlier send unconfirmed. Check WhatsApp before resending.",
       };
-    const text =
-      job.type === "WELCOME"
-        ? `Welcome, ${booking.guestName}. You are checked into Room ${booking.roomNumber}. Message this number if you need assistance during your stay.`
-        : `Hello ${booking.guestName}, your planned checkout for Room ${booking.roomNumber} is ${new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Lagos", dateStyle: "medium", timeStyle: "short" }).format(new Date(booking.checkOutTime))} (Lagos time). Please contact reception if you would like to extend. Reception will confirm your departure.`;
+    const guestFooter = `*${hotel.name} · Guest Services*\nPowered by Sesora`;
+    const checkoutDate = new Date(booking.checkOutTime);
+    const checkoutDay = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Africa/Lagos', day: 'numeric', month: 'long', year: 'numeric',
+    }).format(checkoutDate);
+    const checkoutTime = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Africa/Lagos', hour: 'numeric', minute: '2-digit', hour12: true,
+    }).format(checkoutDate).replace(/12:00\s*pm/i, '12 noon');
+    const text = job.type === "WELCOME"
+      ? `*Welcome to ${hotel.name}*\n\nHello ${booking.guestName}, welcome. You’re checked into *Room ${booking.roomNumber}*.\n\nMessage us here whenever you need assistance during your stay. We’ll keep you updated on your requests through this chat.\n\nWe wish you a comfortable stay.\n\n${guestFooter}`
+      : `*${hotel.name}*\n*Checkout reminder*\n\nHello ${booking.guestName}, we hope you’re enjoying your stay in *Room ${booking.roomNumber}*.\n\nYour scheduled checkout is *${checkoutDay} at ${checkoutTime}* (WAT).\n\nIf you’d like to extend your stay, message us here so reception can check availability and assist you.\n\n${guestFooter}`;
     try {
       outgoing = await messages.create({
         bookingId: booking._id,

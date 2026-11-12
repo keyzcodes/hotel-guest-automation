@@ -1,4 +1,4 @@
-const { approvedQuote, datesText, stayRange, describeStay } = require('./bookingWorkflow');
+const { approvedQuote, datesText, stayRange, describeStay, policyTime } = require('./bookingWorkflow');
 const { generateGuestModelResponse } = require('./guestAiService');
 const { availableRooms } = require('./roomInventory');
 const { lagosDay } = require('./whatsappAvailability');
@@ -134,6 +134,7 @@ async function checkRoomAvailability(args, settings, now, lookup = availableRoom
     return {
       status: 'CHECKED', categories, nights: range.nights, dates: datesText(range),
       arrivalDate, departureDate, guests, mode,
+      checkInLabel: policyTime(settings.checkInTime), checkOutLabel: policyTime(settings.checkOutTime),
       previouslyChecked: [...rates].filter(([key]) => excluded.has(key)).map(([, rate]) => rate.category),
     };
   } catch (error) {
@@ -150,6 +151,7 @@ const initialInstruction = [
   'Explicit information in the latest guest message takes precedence over every saved field and older message. Copy new dates from the latest message even when they differ from lastCheckedStay. Reuse only information that the guest left unchanged.',
   'For any continuation of the same enquiry, set reuseLastStay true. Supply only changed dates, guest count or categories. Retain the saved category selection and mode unless the guest changes them. For a date-only follow-up, reuse the guest count and categories and supply the new dates. For a fresh enquiry set reuseLastStay false and collect its own details.',
   'For a follow-up asking for other options, use ALTERNATIVES without categories. When lastCheckedStay exists, omit its unchanged dates and party size and supply only any changes. If there is no lastCheckedStay, include dates and party size from the conversation or ask for what is missing. A fallback or unrelated message does not erase lastCheckedStay. For a fresh enquiry use its own details.',
+  'Availability is quoted by calendar nights. Send calendar dates to the tool; the backend applies the hotel’s configured check-in and checkout hours. Staff handle requests for exceptional arrival or departure hours.',
   'Use YYYY-MM-DD for dates in tool calls. If the guest says they are coming alone, use one guest. Ask for any stay details you still need.',
   'You may greet or ask a question without a tool. Without a tool result, never state dates, prices, room availability, or hotel policies.',
   'This demo checks availability only. For booking, cancellation, payment or staff requests, tell the guest reception can help. Never claim anything has been booked, held, paid, or sent to staff.',
@@ -182,10 +184,10 @@ function renderResult(result, options, mode) {
     if (item.status === 'CAPACITY_EXCEEDED') return `${item.category} fits up to ${item.capacity} guests.`;
     if (item.status === 'UNAVAILABLE') return `${item.category} isn’t available for those dates.`;
     const price = new Intl.NumberFormat('en-NG', { style: 'currency', currency: item.currency, maximumFractionDigits: item.totalMinor % 100 ? 2 : 0 }).format(item.totalMinor / 100);
-    return `${item.category} is available at ${price} total for ${result.nights} ${result.nights === 1 ? 'night' : 'nights'}.`;
+    return `${item.category} is available at ${price} total.`;
   });
   const next = options.some(item => item.status === 'AVAILABLE') ? ' Reception can help you book.' : '';
-  return `For ${result.dates}:\n${lines.join('\n')}${next}`;
+  return `For ${result.dates} (${result.nights} ${result.nights === 1 ? 'night' : 'nights'}):\n${lines.join('\n')}${next}\nStandard check-in ${result.checkInLabel} · Checkout ${result.checkOutLabel} (WAT).`;
 }
 
 async function answerAvailabilityTurn({ text, history, workflow, availabilityContext, now = new Date() }, {

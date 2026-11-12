@@ -94,7 +94,7 @@ test('a recovered model request runs the PMS tool once and returns its verified 
   });
   assert.equal(providerCalls, 2);
   assert.equal(lookups, 1);
-  assert.match(result.reply, /Junior Suite is available at ₦290,000 total for 2 nights/);
+  assert.match(result.reply, /Junior Suite is available at ₦290,000 total/);
   assert.equal(result.fallback, undefined);
 });
 
