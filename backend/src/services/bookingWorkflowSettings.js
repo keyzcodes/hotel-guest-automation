@@ -27,6 +27,7 @@ async function stayPolicy() {
 async function initialize() {
   if (!enabled()) return;
   await require('../models/BookingEnquiry').init();
+  if (process.env.WHATSAPP_ENQUIRY_AGENT_ENABLED === 'true') await require('../models/GuestEnquirySession').init();
   await settings().updateOne({ _id: hotelId }, {
     $setOnInsert: {
       name: 'Kudu Demo Hotel',

@@ -8,14 +8,6 @@ function getClient(apiKey) {
   }
   return cachedClient;
 }
-function responseBudget(setting, fallback) {
-  const configured = Number(setting);
-  return Number.isFinite(configured) &&
-    configured >= 1000 &&
-    configured <= 20000
-    ? Math.floor(configured)
-    : fallback;
-}
 // Bound the caller's entire wait, even if a provider ignores cancellation.
 // Late model output cannot execute a task: only validated returned decisions do.
 async function withinDeadline(operation, timeoutMs, controller) {
@@ -272,7 +264,7 @@ async function generateGuestModelResponse({ model, contents, config, timeoutMs, 
 async function generateStructuredReply({
   instruction, context, schema,
   model = process.env.GEMINI_MODEL || "gemini-3.8-flash",
-  timeoutMs = responseBudget(process.env.AI_RESPONSE_TIMEOUT_MS, 8000),
+  timeoutMs = require("./workflowTimeouts").aiTimeouts().inStay.timeoutMs,
 }, suppliedClient) {
   const response = await generateGuestModelResponse({
     model,

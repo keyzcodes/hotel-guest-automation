@@ -12,7 +12,7 @@ function fixture(generate) {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/services/guestAiService.js'), 'utf8'), {
     module, process: { env }, AbortController,
     setTimeout: (callback, ms) => { timerCount++; return setTimeout(callback, Math.min(ms, 25)); }, clearTimeout,
-    require: name => { if (name === 'node:perf_hooks') return require(name); assert.equal(name, '@google/genai'); return { GoogleGenAI: class { constructor(options) { instances.push(options); this.models = { generateContent: generate }; } } }; },
+    require: name => { if (name === './workflowTimeouts') return { aiTimeouts: () => require('../src/services/workflowTimeouts').aiTimeouts(env) }; if (name === 'node:perf_hooks') return require(name); assert.equal(name, '@google/genai'); return { GoogleGenAI: class { constructor(options) { instances.push(options); this.models = { generateContent: generate }; } } }; },
   });
   return { run: client => module.exports.interpretGuestMessage(input, client), env, instances, timers: () => timerCount };
 }
