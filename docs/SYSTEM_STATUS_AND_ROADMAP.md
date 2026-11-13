@@ -1,5 +1,25 @@
 # Hotel system — working picture and roadmap
-Updated: 10 November 2026
+Updated: 13 November 2026
+
+## Shared branch merge preparation (13 November 2026)
+
+Baseline: freshly cloned feature/whatsapp-integration at ada1a7d. User Git output confirms main (3cf8d2e) and feature/le-harve-reporting (c33df7d) are ancestors of this branch. All committed Le Harve functionality is already included. The separate Le Harve worktree has uncommitted server formatting and documentation guidance; those files are preserved. The documentation guidance is carried into this branch's frontend/AGENTS.md.
+
+The user reports Auto-Deploy is now OFF for hotel-guest-ops, which follows main. le-harve-demo follows feature/le-harve-reporting and is unchanged. No merge, push to main or deployment has been performed in this preparation. render.yaml still starts the combined server with Telegram webhook configuration; merging source does not configure the hosted WhatsApp service. Review channel, credentials, session storage and normal scheduling before a manual deployment.
+
+Neutral demo branding is configured through backend/.env.whatsapp: HOTEL_NAME=Kudu Demo and HOTEL_GUEST_NAME=Kudu Demo Hotel. Windows application of those local values has not been independently verified. Preserve room inventory and internal property identifiers.
+
+Corrected the check-in test fixture to provide the WhatsApp scheduler explicitly, verify the saved stay is passed once, confirm the Telegram scheduler is not called, and cover scheduler failure and disabled scheduling. This corrects the former incidental TypeError in the test fixture; production behaviour is unchanged.
+
+Verification on the fresh checkout plus this patch:
+- PMS_TEST_URI=<disposable localhost replica-set URI> node --test backend/tests/*.test.cjs: 230 total, 229 passed, zero failed, one skipped. MongoDB 7.0.26 replica set; seven formerly skipped PMS integration cases ran successfully, including overlap contention, booking approval, calendar endpoints, enquiry persistence and checkout outbox reports.
+- The remaining finance-mongodb case requires the dedicated restricted Atlas test account (FINANCE_TEST_URI); no hotel credentials were requested or used. Its skip is not a pass.
+- node --test frontend/tests/*.test.mjs: 31 passed, zero failed.
+- node frontend/node_modules/typescript/bin/tsc --project frontend/tsconfig.json --noEmit --incremental false: passed.
+- Production build: user-reported Windows success on ada1a7d on 12 November; not rerun for this test/documentation-only patch.
+- AI and messaging provider calls in these tests are simulated. Live Gemini failures remain unresolved; no real WhatsApp delivery is established by these checks.
+
+Next: apply and verify the patch on Windows, commit it on feature/whatsapp-integration, then fast-forward main after checking the working tree and remote refs. Keep Auto-Deploy off while hosted configuration is reviewed.
 
 ## Gemini to Terra failover (10 November 2026)
 

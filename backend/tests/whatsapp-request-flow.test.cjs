@@ -88,13 +88,18 @@ test('encrypted session survives roundtrip and rejects wrong keys and modified c
   const tampered = Buffer.from(encrypted, 'base64'); tampered[30] ^= 1;
   assert.throws(() => codec.open(tampered.toString('base64')));
 });
-function checkinFixture(duplicate = false, policy = {checkInTime: '14:00', checkOutTime: '12:00'}) {
-  const created = [], scheduled = [];
+function checkinFixture(duplicate = false, policy = {checkInTime: '14:00', checkOutTime: '12:00'}, scheduling = {}) {
+  const created = [], scheduled = [], whatsappScheduled = [], errors = [];
   const dependencies = {
     mongoose: {},
     '../models/Booking': { exists: async () => duplicate, create: async data => { created.push(data); return { ...data, _id: 'new-stay' }; } },
     '../models/ScheduledJob': {},
     '../services/schedulingService': { scheduleCheckInJobs: async () => scheduled.push(true) },
+    '../services/whatsappStayMessages': { schedule: async booking => {
+      whatsappScheduled.push(booking);
+      if (scheduling.error) throw scheduling.error;
+      return scheduling.result ?? true;
+    } },
     '../services/guestChannel': { whatsapp: () => true },
     '../services/whatsappIdentity': require('../src/services/whatsappIdentity'),
     '../services/bookingWorkflowSettings': { stayPolicy: async () => policy },
@@ -103,15 +108,18 @@ function checkinFixture(duplicate = false, policy = {checkInTime: '14:00', check
   };
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/controllers/bookingController.js'), 'utf8'), {
-    module, require: name => dependencies[name], console, process: { env: {} }
+    module, require: name => {
+      if (!(name in dependencies)) throw new Error(`Missing test dependency: ${name}`);
+      return dependencies[name];
+    }, console: { ...console, error: (...args) => errors.push(args) }, process: { env: {} }
   });
-  return { created, scheduled, async run(phone, fields = {}) {
+  return { created, scheduled, whatsappScheduled, errors, async run(phone, fields = {}) {
     const response = { code: 200, status(code) { this.code = code; return this; }, json(data) { this.data = data; return this; } };
     await module.exports.checkInGuest({ body: { guestName: 'Test Guest', guestPhone: phone, roomNumber: '203', telegramChatId: 'old-chat', checkOutTime: new Date(Date.now()+86400000).toISOString(), ...fields } }, response);
     return response;
   }};
 }
-test('WhatsApp check-in saves normalized identity and schedules no unsupported reminders', async () => {
+test('WhatsApp check-in schedules through the WhatsApp service, not the Telegram scheduler', async () => {
   const f = checkinFixture();
   const response = await f.run('0801 234 5678');
   assert.equal(response.code, 201);
@@ -119,16 +127,42 @@ test('WhatsApp check-in saves normalized identity and schedules no unsupported r
   assert.equal(f.created[0].whatsappJid, '2348012345678@s.whatsapp.net');
   assert.equal(f.created[0].telegramChatId, null);
   assert.equal(response.data.requestMessagingReady, true);
+  assert.equal(response.data.automationScheduled, true);
+  assert.equal(f.scheduled.length, 0);
+  assert.equal(f.whatsappScheduled.length, 1);
+  assert.equal(f.whatsappScheduled[0]._id, 'new-stay');
+  assert.equal(f.whatsappScheduled[0].whatsappJid, '2348012345678@s.whatsapp.net');
+  assert.equal(f.errors.length, 0);
+});
+test('a real scheduling failure preserves the saved stay and reports automation unavailable', async () => {
+  const f = checkinFixture(false, undefined, { error: new Error('Synthetic scheduler failure') });
+  const response = await f.run('08012345678');
+  assert.equal(response.code, 201);
+  assert.equal(f.created.length, 1);
+  assert.equal(f.whatsappScheduled.length, 1);
+  assert.equal(response.data.requestMessagingReady, true);
   assert.equal(response.data.automationScheduled, false);
+  assert.equal(f.errors.length, 1);
+  assert.equal(f.errors[0][0], 'Booking saved but job scheduling failed:');
+  assert.equal(f.scheduled.length, 0);
+});
+test('disabled WhatsApp scheduling is reported without a scheduler error', async () => {
+  const f = checkinFixture(false, undefined, { result: false });
+  const response = await f.run('08012345678');
+  assert.equal(response.code, 201);
+  assert.equal(response.data.automationScheduled, false);
+  assert.equal(f.errors.length, 0);
   assert.equal(f.scheduled.length, 0);
 });
 test('invalid number and existing active WhatsApp stay cannot create a new check-in', async () => {
   const invalid = checkinFixture();
   assert.equal((await invalid.run('not a number')).code, 400);
   assert.equal(invalid.created.length, 0);
+  assert.equal(invalid.whatsappScheduled.length, 0);
   const duplicate = checkinFixture(true);
   assert.equal((await duplicate.run('08012345678')).code, 409);
   assert.equal(duplicate.created.length, 0);
+  assert.equal(duplicate.whatsappScheduled.length, 0);
 });
 
 test('a slow WhatsApp request shows typing and sends only the final reply, ignoring replays', async t => {
@@ -181,6 +215,7 @@ test('calendar checkout dates apply configured WAT policy hours and preserve tim
   const invalid = checkinFixture();
   assert.equal((await invalid.run('0801 234 5678', {checkOutTime: undefined, checkOutDate: '2099-11-31'})).code, 400);
   assert.equal(invalid.created.length, 0);
+  assert.equal(invalid.whatsappScheduled.length, 0);
   const conflicting = checkinFixture();
   assert.equal((await conflicting.run('0801 234 5678', {checkOutDate: '2099-11-12'})).code, 400);
 });
