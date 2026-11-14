@@ -6,6 +6,10 @@ requests and automated stay messages into one staff workspace.
 Ready for supervised early testing. Currently runs locally with Telegram
 as the guest messaging channel. Public hosting is not configured yet.
 
+For the new one-container deployment and release pipeline, see
+[Deployment guide](docs/CONTAINER_DEPLOYMENT.md). Current verification and known issues
+are recorded in [System status](docs/SYSTEM_STATUS_AND_ROADMAP.md).
+
 ## What works
 
 - Record guest check-ins and link Telegram conversations to individual stays.

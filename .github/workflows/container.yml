@@ -1,0 +1,137 @@
+name: Container release
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_demo:
+        description: Deploy to the configured demo server after checks
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - run: npm --prefix backend ci
+      - run: npm --prefix frontend ci --include=dev
+      - name: Start disposable test database
+        run: |
+          docker run -d --name sesora-test-db -p 127.0.0.1:27017:27017 mongo:7.0 --replSet rs0 --bind_ip_all
+          node <<'JS'
+          const { MongoClient } = require('./backend/node_modules/mongodb');
+          (async () => {
+            const c = new MongoClient('mongodb://127.0.0.1:27017/?directConnection=true', { serverSelectionTimeoutMS: 20000 });
+            await c.connect();
+            await c.db('admin').command({ replSetInitiate: { _id: 'rs0', members: [{ _id: 0, host: '127.0.0.1:27017' }] } });
+            for (let i = 0; i < 100; i++) {
+              if ((await c.db('admin').command({ hello: 1 })).isWritablePrimary) { await c.close(); return; }
+              await new Promise(r => setTimeout(r, 200));
+            }
+            throw Error('Test database not ready');
+          })().catch(e => { console.error(e.name); process.exitCode = 1; });
+          JS
+      - name: Backend and frontend tests
+        env:
+          PMS_TEST_URI: mongodb://127.0.0.1:27017/?replicaSet=rs0
+        run: |
+          node --test backend/tests/*.test.cjs
+          node --test frontend/tests/*.test.mjs
+      - name: Build production image
+        run: docker build --tag sesora-ci:${{ github.sha }} .
+      - name: Validate Compose configuration
+        run: |
+          cp deploy/container.env.example deploy/container.env
+          SESORA_IMAGE=sesora-ci:${{ github.sha }} docker compose config --quiet
+          rm deploy/container.env
+      - name: Smoke-test combined container
+        run: |
+          node <<'JS'
+          const fs = require('node:fs');
+          const { hashPassword } = require('./backend/src/services/staffAuthService');
+          (async () => fs.writeFileSync('/tmp/sesora-smoke.env', [
+            'MONGO_URI=mongodb://127.0.0.1:27017/sesora_container_smoke?replicaSet=rs0',
+            'GUEST_MESSAGING_ENABLED=false', 'GUEST_CHANNEL=TELEGRAM',
+            'STAFF_EMAIL=smoke@example.test', 'STAFF_PASSWORD_HASH=' + await hashPassword('Synthetic-smoke-password-123'),
+          ].join('\n'), { mode: 0o600 }))().catch(() => { process.exitCode = 1; });
+          JS
+          docker run -d --name sesora-smoke --network host --env-file /tmp/sesora-smoke.env sesora-ci:${{ github.sha }}
+          for n in $(seq 1 60); do
+            if [ "$(docker inspect --format '{{.State.Health.Status}}' sesora-smoke)" = healthy ]; then exit 0; fi
+            sleep 2
+          done
+          docker logs --tail 60 sesora-smoke
+          exit 1
+      - name: Publish tested image
+        id: publish
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ref="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag "sesora-ci:${GITHUB_SHA}" "$ref"
+          docker push "$ref"
+          digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$ref")
+          printf 'image=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+      - name: Clean disposable resources
+        if: always()
+        run: |
+          docker rm -f sesora-smoke sesora-test-db 2>/dev/null || true
+          rm -f /tmp/sesora-smoke.env
+  deploy_demo:
+    needs: build
+    if: github.ref == 'refs/heads/main' && needs.build.outputs.image != '' && (vars.DEMO_AUTO_DEPLOY == 'true' || inputs.deploy_demo == true)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: demo
+    concurrency:
+      group: sesora-demo-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Ignore an obsolete build
+        id: current
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          if [ "$(git rev-parse HEAD)" = "$EXPECTED_SHA" ]; then echo 'deploy=true' >> "$GITHUB_OUTPUT"; fi
+      - name: Deploy exact tested image
+        if: steps.current.outputs.deploy == 'true'
+        env:
+          SSH_KEY: ${{ secrets.DEMO_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEMO_KNOWN_HOSTS }}
+          SSH_HOST: ${{ vars.DEMO_HOST }}
+          SSH_USER: ${{ vars.DEMO_USER }}
+          DEPLOY_PATH: ${{ vars.DEMO_PATH }}
+          IMAGE_REF: ${{ needs.build.outputs.image }}
+        run: |
+          [[ "$SSH_HOST" =~ ^[a-zA-Z0-9.-]+$ && "$SSH_USER" =~ ^[a-zA-Z0-9_-]+$ ]]
+          [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ && "$IMAGE_REF" =~ ^ghcr.io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]
+          test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS"
+          key=$(mktemp)
+          hosts=$(mktemp)
+          trap 'rm -f "$key" "$hosts"' EXIT
+          chmod 600 "$key" "$hosts"
+          printf '%s\n' "$SSH_KEY" > "$key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$hosts"
+          ssh -i "$key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts" \
+            "$SSH_USER@$SSH_HOST" "cd '$DEPLOY_PATH' && bash deploy/release.sh '$IMAGE_REF'"

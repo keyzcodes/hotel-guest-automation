@@ -177,6 +177,7 @@ async function processGuestMessage(ctx) {
       beginResponse();
       const { answerPreStay } = require("./preStayGuestService");
       const { enquiryWindowMs } = require("./whatsappAvailability");
+      const enquiryAgent = process.env.WHATSAPP_ENQUIRY_AGENT_ENABLED === "true";
       const availabilityDemo = process.env.WHATSAPP_AVAILABILITY_TOOL_DEMO === "true";
       const history = await Message.find({
         channel: "WHATSAPP",
@@ -189,14 +190,21 @@ async function processGuestMessage(ctx) {
       const workflow = process.env.WHATSAPP_BOOKING_WORKFLOW_ENABLED === "true"
         ? await require("./bookingWorkflowService").forGuest(chatId, text)
         : undefined;
-      const lastAvailability = workflow && availabilityDemo ? await Message.findOne({
+      const lastAvailability = workflow && (availabilityDemo || enquiryAgent) ? await Message.findOne({
         channel: "WHATSAPP", chatId, bookingId: null, direction: "INBOUND",
         "availabilityContext.arrivalDate": { $exists: true },
         _id: { $ne: inbound._id }, createdAt: { $lte: inbound.createdAt },
       }).sort({ createdAt: -1, _id: -1 }).select("+availabilityContext").lean() : null;
-      const answer = workflow && availabilityDemo
+      const session = workflow && enquiryAgent
+        ? await require('./enquirySessionStore').openSession({
+          hotelId: require('./bookingWorkflowSettings').hotelId, chatId,
+          seed: lastAvailability?.availabilityContext ?? workflow.progress?.details,
+        }) : undefined;
+      const answer = session ? require('./enquiryAgent').runEnquiryAgent : workflow && availabilityDemo
         ? require("./preStayAvailabilityTool").answerAvailabilityTurn : answerPreStay;
       const outcome = await timing.measure("pre_stay_conversation", () => answer({
+        timing,
+        session,
         text,
         hotel,
         ...(workflow ? { workflow } : {}),

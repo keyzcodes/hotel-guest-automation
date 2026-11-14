@@ -1,0 +1,21 @@
+name: sesora
+services:
+  app:
+    image: ${SESORA_IMAGE:?Set SESORA_IMAGE to a tested image tag or digest}
+    env_file:
+      - path: ./deploy/container.env
+        format: raw
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      SERVE_FRONTEND: "true"
+    ports:
+      - "127.0.0.1:5000:5000"
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 35s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
