@@ -1,5 +1,15 @@
 # Hotel system — working picture and roadmap
-Updated: 13 November 2026
+Updated: 14 November 2026
+
+## Simple container release foundation (14 November 2026)
+
+User approved a simple combined container: frontend, backend, WhatsApp and workers together; Atlas external; builds off-server; one active session owner and brief stop/start downtime. User reports successful hands-on mobile finance demos with the Le Harve GM, who will discuss with the CEO and invite a demo at the 18 November GM meeting. These are user-reported outcomes, not a sale or confirmed invitation. Module price discussed: NGN450,000; hosting/maintenance terms unconfirmed.
+
+Implemented locally: multi-stage Dockerfile, one Compose service, private runtime environment template, readiness checks, Linux release lock and previous-image recovery, and GitHub Actions test/build/smoke/publish with opt-in demo deployment. Health checks API/database/dashboard and enabled WhatsApp readiness. Image rollback does not roll back database changes or runtime configuration. See docs/CONTAINER_DEPLOYMENT.md. No cloud instance, reverse proxy, credentials, push or deployment created; existing Render services unchanged.
+
+Verified locally: nine deployment/health tests passed with simulated Docker CLI and real HTTP fixture; full backend 283 total, 273 passed, 10 database-dependent skipped; frontend 31 passed. Production frontend build passed using Webpack because workspace dependencies are linked outside the build root. Shell syntax and YAML parsing passed. Docker engine unavailable: actual image build, pruned runtime, Compose and CI execution remain unverified. One-GB runtime memory unmeasured. Prior real-Mongo verification was not repeated for this run.
+
+Next: apply incremental patch, run Docker build/CI, configure one demo server privately, rehearse release/recovery, then enable demo auto-deploy. Live-hotel deployment needs a separate environment and approval decision. Provider failures and remaining live enquiry evaluations remain unresolved; packaging does not fix those issues.
 
 ## Preserve partial changes and shorten quotes (13 November 2026)
 
