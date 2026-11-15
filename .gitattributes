@@ -1,0 +1,6 @@
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+compose.yaml text eol=lf
+deploy/*.sh text eol=lf
+deploy/*.cjs text eol=lf
+.github/workflows/*.yml text eol=lf

@@ -117,8 +117,9 @@ async function interpretPreStay(generate, request, timeoutMs, backup) {
   }
 }
 
-async function answerPreStay({ text, history, hotel, now = new Date(), workflow },
+async function answerPreStay({ text, history, hotel, now = new Date(), workflow, timing },
   generate = generateStructuredReply, { backup = generate === generateStructuredReply ? configuredBackup() : undefined } = {}) {
+  const measure = (stage, operation) => timing ? timing.measure(stage, operation) : operation();
   const facts = publicFacts(workflow ? workflow.settings : hotel);
   try {
     if (process.env.USE_MOCK_AI === 'true' && generate === generateStructuredReply) throw new Error('Live AI disabled');
@@ -128,9 +129,7 @@ async function answerPreStay({ text, history, hotel, now = new Date(), workflow 
       if (workflow.settings.amenities?.length) facts.amenities = `Hotel amenities include ${workflow.settings.amenities.join(', ')}.`;
       facts.checkout = `Checkout is by ${workflow.settings.checkOutTime} (Lagos time).`;
     }
-    const configuredTimeout = Number(process.env.WHATSAPP_PRE_STAY_TIMEOUT_MS);
-    const timeoutMs = Number.isInteger(configuredTimeout) && configuredTimeout >= 1000 && configuredTimeout <= 20000
-      ? configuredTimeout : 12000;
+    const timeoutMs = require('./workflowTimeouts').aiTimeouts().preStay.timeoutMs;
     const startedAt = performance.now();
     const model = process.env.WHATSAPP_PRE_STAY_MODEL?.trim() || 'gemini-3.1-flash-lite';
     const bookingActions = ['BOOKING_DETAILS', 'BOOKING_ACCEPT', 'BOOKING_STATUS', 'BOOKING_PRICE'];
@@ -148,7 +147,7 @@ async function answerPreStay({ text, history, hotel, now = new Date(), workflow 
       history: history.filter(message => message.direction !== 'OUTBOUND' || message.text !== temporaryFailureReply),
       latestGuestMessage: text,
     };
-    const { decision, generator } = await interpretPreStay(generate, {
+    const { decision, generator } = await measure('pre_stay_ai', () => interpretPreStay(generate, {
       model,
       instruction: workflow ? instruction + '\n' + bookingInstruction : instruction,
       schema: workflow ? { ...schema, properties: {
@@ -160,21 +159,21 @@ async function answerPreStay({ text, history, hotel, now = new Date(), workflow 
         guestName: { type: 'string', maxLength: 100 },
       } } : schema,
       context,
-    }, timeoutMs, backup);
+    }, timeoutMs, backup));
     if (!decision || !supported.includes(decision.action) || typeof decision.bookingEnquiry !== 'boolean') {
       throw new Error('Invalid pre-stay AI decision');
     }
     const { action, bookingEnquiry } = decision;
     if (workflow && (bookingActions.includes(action) || action === 'CHECK_AVAILABILITY')) {
-      const outcome = await workflow.handle({
+      const outcome = await measure('booking_workflow', () => workflow.handle({
         ...decision,
         intent: {
           BOOKING_ACCEPT: 'ACCEPT', BOOKING_STATUS: 'STATUS', BOOKING_PRICE: 'PRICE',
         }[action] || 'DETAILS',
-      });
-      return outcome.conversational ? await composeReply(generator, {
+      }));
+      return outcome.conversational ? await measure('pre_stay_reply_ai', () => composeReply(generator, {
         model, context, outcome, remainingMs: Math.floor(timeoutMs - (performance.now() - startedAt)),
-      }) : outcome;
+      })) : outcome;
     }
     if (action === 'HANDOFF') return { action, reply: handoff, bookingEnquiry };
     if (action === 'CHECK_AVAILABILITY') {

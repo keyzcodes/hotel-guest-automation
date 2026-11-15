@@ -10,7 +10,7 @@ function load(service, dependencies) {
     module,
     process: { env: {} },
     console: { info() {}, warn() {} },
-    require: name => dependencies[name],
+    require: name => name === './workflowTimeouts' ? { aiTimeouts: () => require('../src/services/workflowTimeouts').aiTimeouts({}) } : dependencies[name],
   });
   return module.exports;
 }
@@ -163,7 +163,7 @@ test('an unlinked WhatsApp message receives the pre-stay answer and saves it onc
     module,
     console: { error() {} },
     process: { env: { WHATSAPP_AVAILABILITY_ENABLED: 'true', ROOM_BOARD_ENABLED: 'true' } },
-    require: name => dependencies[name],
+    require: name => name === './workflowTimeouts' ? { aiTimeouts: () => require('../src/services/workflowTimeouts').aiTimeouts({}) } : dependencies[name],
   });
   const context = {
     channel: 'WHATSAPP',

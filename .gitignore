@@ -12,3 +12,7 @@ out/
 dist/
 *.tsbuildinfo
 /frontend/next-env.d.ts
+
+# Private container configuration and local release state
+/deploy/container.env
+/.release/

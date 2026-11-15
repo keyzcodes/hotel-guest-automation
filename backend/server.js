@@ -43,7 +43,9 @@ app.use("/api/conversations", require("./src/routes/conversationRoutes"));
 // Unknown API paths must not fall through into Next.js's development proxy.
 app.use("/api", (req, res) => res.status(404).json({ success: false, message: "API route not found." }));
 app.get("/health", (req, res) => {
-  const healthy = ready && mongoose.connection.readyState === 1;
+  const whatsappReady = !messagingEnabled || !require('./src/services/guestChannel').whatsapp() ||
+    require('./src/services/whatsappService').isConnected();
+  const healthy = ready && mongoose.connection.readyState === 1 && whatsappReady;
   res.set("Cache-Control", "no-store").status(healthy ? 200 : 503).json({
     status: healthy ? "OK" : "UNAVAILABLE",
     message: healthy ? "Hotel Ops Backend is running" : "Service is starting or unavailable",
@@ -73,6 +75,9 @@ async function start() {
   }
   await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 15000 });
   console.log("Connected to MongoDB Atlas.");
+  if (require('./src/services/guestChannel').whatsapp()) {
+    console.info('WORKFLOW_TIMEOUTS', JSON.stringify(require('./src/services/workflowTimeouts').startupDiagnostics()));
+  }
   if (process.env.ROOM_BOARD_ENABLED === "true") {
     await Promise.all([require("./src/models/Room").init(), require("./src/models/Reservation").init()]);
     await require("./src/services/demoRooms").seedDemoRooms(mongoose.connection.name);

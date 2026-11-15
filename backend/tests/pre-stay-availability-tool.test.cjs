@@ -381,3 +381,73 @@ test('availability presents calendar nights and the property policy hours', asyn
   assert.match(result.reply, /21 Nov 2026 to 23 Nov 2026 \(2 nights\)/);
   assert.match(result.reply, /Standard check-in 2:00 PM · Checkout 11:30 AM \(WAT\)/);
 });
+
+test('latest configured category overrides stale model selection and survives date changes and alternatives', async () => {
+  let previous = { arrivalDate: args.arrivalDate, departureDate: args.departureDate, guests: 1,
+    requestedCategories: ['Standard'], checkedCategories: ['Standard'], mode: 'COMPARE' };
+  const workflow = { settings, progress: { details: { ...args, category: 'Standard' } } };
+  let lookupCount = 0;
+  async function turn(text, modelArgs) {
+    const result = await answerAvailabilityTurn({ text, history: [], workflow, availabilityContext: previous, now }, {
+      generate: async request => {
+        const context = JSON.parse(request.contents[0].parts[0].text);
+        assert.equal(context.savedStay, undefined, 'No competing old workflow category');
+        assert.deepEqual(context.lastCheckedStay, previous);
+        return toolResponse(modelArgs);
+      },
+      lookup: async () => { lookupCount++; return settings.roomRates.map(rate => ({ category: rate.category })); },
+    });
+    if (result.availabilityContext) previous = result.availabilityContext;
+    return result;
+  }
+  const changed = await turn('Is imperial available', { mode: 'COMPARE', reuseLastStay: true, categories: ['Standard'] });
+  assert.match(changed.reply, /Imperial is available/);
+  assert.doesNotMatch(changed.reply, /Standard is available/);
+  assert.deepEqual(previous.requestedCategories, ['Imperial']);
+  assert.deepEqual(previous.checkedCategories, ['Standard', 'Imperial']);
+  assert.equal(previous.guests, 1);
+  assert.equal(previous.arrivalDate, args.arrivalDate);
+  const alternatives = await turn('What else can you offer?', { mode: 'ALTERNATIVES', reuseLastStay: true, categories: ['Imperial'] });
+  assert.match(alternatives.reply, /Luxury is available/);
+  assert.match(alternatives.reply, /Junior Suite is available/);
+  assert.doesNotMatch(alternatives.reply, /Imperial is available|Standard is available/);
+  const choose = await turn('Is Luxury available?', { mode: 'COMPARE', reuseLastStay: true, categories: ['Standard'] });
+  assert.deepEqual(choose.availabilityContext.requestedCategories, ['Luxury']);
+  const dates = await turn('How about 23 to 24 November?', { mode: 'COMPARE', reuseLastStay: true });
+  assert.deepEqual(dates.availabilityContext.requestedCategories, ['Luxury']);
+  assert.equal(dates.availabilityContext.arrivalDate, '2026-11-23');
+  assert.deepEqual(dates.availabilityContext.checkedCategories, ['Luxury'], 'New dates reset discussed inventory');
+  assert.equal(lookupCount, 4);
+});
+
+test('category grounding uses each property catalog, not fixed names or partial matches', async () => {
+  const custom = { ...settings, roomRates: [{ category: 'Garden (Plus)', capacity: 2, nightlyMinor: 100000 }] };
+  const result = await answerAvailabilityTurn({ text: 'Is Garden (Plus) available?', history: [], workflow: { settings: custom }, now }, {
+    generate: async () => toolResponse({ ...args, categories: ['Standard'] }),
+    lookup: async () => [{ category: 'Garden (Plus)' }],
+  });
+  assert.deepEqual(result.availabilityContext.requestedCategories, ['Garden (Plus)']);
+  for (const text of ['Not Imperial, please', 'Anything other than Imperial', 'Is Imperialism a room name?', 'If Imperial is full, Luxury please']) {
+    const outcome = await answerAvailabilityTurn({ text, history: [], workflow: { settings }, now }, {
+      generate: async () => toolResponse({ ...args, categories: ['Luxury'] }),
+      lookup: async () => [{ category: 'Luxury' }],
+    });
+    assert.deepEqual(outcome.availabilityContext.requestedCategories, ['Luxury'], 'Do not overwrite interpreted exclusions or complex preferences');
+  }
+});
+
+test('alternatives remember unavailable options without repeating them, but explicit requests can recheck', async () => {
+  const previous = { ...args, requestedCategories: ['Imperial'], checkedCategories: ['Imperial'] };
+  const first = await answerAvailabilityTurn({ text: 'Any other options?', history: [], workflow: { settings }, availabilityContext: previous, now }, {
+    generate: async () => toolResponse({ mode: 'ALTERNATIVES', reuseLastStay: true }), lookup: async () => [],
+  });
+  assert.equal(first.availabilityContext.checkedCategories.length, 4);
+  const exhausted = await answerAvailabilityTurn({ text: 'Anything else?', history: [], workflow: { settings }, availabilityContext: first.availabilityContext, now }, {
+    generate: async () => toolResponse({ mode: 'ALTERNATIVES', reuseLastStay: true }), lookup: async () => assert.fail('No unmentioned categories remain'),
+  });
+  assert.match(exhausted.reply, /couldn’t find any other room options/);
+  const explicit = await answerAvailabilityTurn({ text: 'Check Imperial again', history: [], workflow: { settings }, availabilityContext: first.availabilityContext, now }, {
+    generate: async () => toolResponse({ mode: 'COMPARE', reuseLastStay: true, categories: ['Imperial'] }), lookup: async () => [{ category: 'Imperial' }],
+  });
+  assert.match(explicit.reply, /Imperial is available/);
+});
