@@ -1,6 +1,37 @@
 # Hotel system — working picture and roadmap
 Updated: 16 November 2026
 
+## Current live checkpoint — 16 November 2026
+
+This section supersedes pending-verification statements in earlier entries. Evidence is user-provided logs, WhatsApp messages and screenshots; no direct AWS inspection was performed here.
+
+### User-reported live verified
+
+- AWS Lightsail: Ubuntu 24.04 LTS, x86_64, 2 GB RAM, Stockholm. Frontend/backend run together in Docker; Atlas remains external. GitHub builds and publishes the image to GHCR. The laptop can be off.
+- https://sesora-demo.duckdns.org serves the dashboard over Caddy HTTPS, proxying to loopback port 5000. Certificate issuance, HTTP/2 200 and the health endpoint returning OK were evidenced.
+- Latest working image: `ghcr.io/keyzcodes/hotel-guest-automation@sha256:3682cac5084f0f82ce91813951c8f8e976feaaa23380130a19efc5fa33ab449f`. `/home/ubuntu/sesora/.release/current` records it. Container `sesora-app-1` reported Up 14 minutes (healthy), with port 5000 bound to 127.0.0.1. This is a release checkpoint, not a database backup.
+- Availability retained guest count and dates across Imperial to Luxury, then retained Luxury across a date-only change. Correct observed totals: Imperial NGN170,000/two nights; Luxury NGN220,000/two nights, then NGN110,000/one night. Autonomous reservation creation was not tested by this journey.
+- New check-in delivered welcome, settling-in check and checkout reminder. Towels created a Housekeeping ticket; staff completion delivered the approved short confirmation. Thank-you received a conversational reply. At least one ticket used local fallback after an eight-second AI deadline, so these results do not prove model reliability.
+- Confirmed checkout delivered the guest farewell and GM Demo Operations Report to the user's own test recipient. The report included stay activity, remaining open requests and room statuses. It is checkout-triggered, not a scheduled nightly/financial report. External GM delivery is not claimed.
+- Latest screenshot confirms the outlined Open conversation control alongside one Close review action. Service tickets use Complete & notify. Reviews still require a staff reply before closure. Full mobile/both-theme visual verification remains pending.
+
+### Deployment and demo settings
+
+- GitHub-to-AWS SSH deployment succeeded. The published digest selection was corrected. Repository Actions variable `DEMO_AUTO_DEPLOY=true` is now set; deployment host/user/path and two SSH-related secrets belong to the demo environment. Never record secret values here.
+- Previous main builds skipped deployment when the switch existed only at environment scope. A subsequent manually triggered workflow updated the live UI after adding the repository variable. The next fresh main merge must still confirm automatic build and deployment after that correction.
+- Private runtime settings live at `/home/ubuntu/sesora/deploy/container.env`; recreating/releasing the container applies changes. Image recovery does not roll back runtime settings or the database. Controlled rollback and database restore rehearsals remain pending.
+- Demo schedule: welcome at check-in, settling-in around one minute later, checkout reminder around two minutes after check-in. Completion and checkout remain staff actions. Five minutes is a rehearsal target, not guaranteed delivery timing. Normal timing remains separate from accelerated demo mode.
+
+### Remaining work before further features
+
+- Prepare inventory deliberately: the last report showed zero Ready, two Occupied, two awaiting cleaning and eight Out of service. This is a snapshot; inspect rooms before changing their state.
+- Investigate the food typo routed to General Inquiry. Its reception review remained open; do not claim classification fixed.
+- Provider 503/429/deadline handling remains unresolved. In-stay and pre-stay use different AI budgets; container health does not guarantee model success.
+- Reconcile report “Awaiting cleaning” with dashboard “Vacant · Dirty”; verify responsive layouts and investigate recurring roughly 25-second shutdowns.
+- Review Atlas broad development access without disrupting existing clients; verify backup/restore and failed-release recovery. Idle memory readings do not establish full-workload capacity on a 1 GB instance.
+
+This documentation-only checkpoint is prepared locally; application to Windows and commit/push remain unconfirmed. No product code, runtime setting or deployment changed.
+
 ## Outlined conversation control (16 November 2026)
 
 User-reported screenshot shows the single-action release on the live dashboard: Open conversation as a text link and Close review on a General Inquiry. Review closure still correctly requires a staff reply; this is not a physical service completion. User rejected the plain blue underline, approved a preview of a quiet outlined secondary control, and authorised responsive implementation. Implemented locally: existing message icon, neutral themed border, muted label, no underline, 44px minimum touch height, explicit keyboard focus, disabled state, subtle hover, max-width protection and wrapped label. Full available width on viewports up to 480px; compact width above that. Existing mobile list/detail layout, primary Complete & notify action and review rules remain unchanged. No new workflow, API, dependency or backend change.
