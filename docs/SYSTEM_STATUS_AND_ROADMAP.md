@@ -1,6 +1,12 @@
 # Hotel system — working picture and roadmap
 Updated: 16 November 2026
 
+## Outlined conversation control (16 November 2026)
+
+User-reported screenshot shows the single-action release on the live dashboard: Open conversation as a text link and Close review on a General Inquiry. Review closure still correctly requires a staff reply; this is not a physical service completion. User rejected the plain blue underline, approved a preview of a quiet outlined secondary control, and authorised responsive implementation. Implemented locally: existing message icon, neutral themed border, muted label, no underline, 44px minimum touch height, explicit keyboard focus, disabled state, subtle hover, max-width protection and wrapped label. Full available width on viewports up to 480px; compact width above that. Existing mobile list/detail layout, primary Complete & notify action and review rules remain unchanged. No new workflow, API, dependency or backend change.
+
+Verification: 31 frontend tests passed; component ESLint, production build (--webpack for external linked dependencies) and git diff --check passed. Browser visual verification remains pending because Chromium socket creation is blocked in this workspace; do not claim screenshot/pixel or device testing. Check 320px/390px/tablet/desktop in both themes after CI deployment. Prepared as an incremental patch after Single Request Action; not applied to Windows or AWS by this local work. First merge-triggered deployment confirmation remains separate from successful manually triggered deployment; check latest main build/deploy results and repository-level switch. Food classification and GM/farewell demonstration remain pending.
+
 ## Single-action request completion (16 November 2026)
 
 User approved the minimal service-request flow: receive, fulfil physically, Complete & notify. Implemented locally: remove Start handling and Escalate controls; remaining completion is primary, with no handling prerequisite. Resolved requests show completion/send evidence with no workflow button. Open conversation remains a keyboard-accessible button styled as a quiet text link because it switches an existing workspace view, not a URL. Reception reviews retain Close review and the existing backend requirement for a staff reply; they are not silently treated as physical services. Remove the extra completion instruction from the panel. Existing history restrictions, theme, room colours, backend states and notification logic are unchanged.
