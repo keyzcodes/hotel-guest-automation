@@ -22,7 +22,7 @@ function createService(deps = {}) {
     `${PREFIX}${b._id}:${type}${type === "PRE_CHECKOUT" ? ":" + new Date(b.checkOutTime).toISOString() : ""}`;
   function eligible(b, job) {
     if (!active(b) || new Date(b.checkOutTime) <= now()) return false;
-    if (!["WELCOME", "PRE_CHECKOUT"].includes(job.type)) return false;
+    if (!["WELCOME", "PULSE_CHECK", "PRE_CHECKOUT"].includes(job.type)) return false;
     return job.idempotencyKey === keyFor(b, job.type);
   }
   async function schedule(booking) {
@@ -35,8 +35,10 @@ function createService(deps = {}) {
       departure <= arrival
     )
       throw Error("Invalid stay times.");
+    const pulseAt = new Date(arrival.getTime() + (process.env.JOB_DEMO_MODE === "true" ? 60000 : 15 * 60000));
     for (const [type, scheduledFor] of [
       ["WELCOME", arrival],
+      ...(pulseAt < departure ? [["PULSE_CHECK", pulseAt]] : []),
       [
         "PRE_CHECKOUT",
         new Date(
@@ -112,6 +114,8 @@ function createService(deps = {}) {
     }).format(checkoutDate).replace(/12:00\s*pm/i, '12 noon');
     const text = job.type === "WELCOME"
       ? `*Welcome to ${hotel.name}*\n\nHello ${booking.guestName}, welcome. You’re checked into *Room ${booking.roomNumber}*.\n\nMessage us here whenever you need assistance during your stay. We’ll keep you updated on your requests through this chat.\n\nWe wish you a comfortable stay.\n\n${guestFooter}`
+      : job.type === "PULSE_CHECK"
+      ? `*${hotel.name}*\n\nHello ${booking.guestName}, we hope you’re settling comfortably into Room ${booking.roomNumber}.\n\nIs everything in your room as you expected? If there’s anything you need, simply reply here and we’ll be happy to assist.\n\n${guestFooter}`
       : `*${hotel.name}*\n*Checkout reminder*\n\nHello ${booking.guestName}, we hope you’re enjoying your stay in *Room ${booking.roomNumber}*.\n\nYour scheduled checkout is *${checkoutDay} at ${checkoutTime}* (WAT).\n\nIf you’d like to extend your stay, message us here so reception can check availability and assist you.\n\n${guestFooter}`;
     try {
       outgoing = await messages.create({
@@ -256,7 +260,7 @@ function createService(deps = {}) {
     timer.unref();
     launchTick();
     console.log(
-      "WhatsApp welcome and checkout reminders enabled for new check-ins.",
+      "WhatsApp welcome, settling-in checks and checkout reminders enabled for new check-ins.",
     );
   }
   async function stop() {

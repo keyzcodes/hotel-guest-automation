@@ -20,6 +20,7 @@ function fixture(category = "Housekeeping", failure = false, whatsapp = false) {
     whatsappJid: "2348012345678@s.whatsapp.net",
   };
   const dependencies = {
+    "./taskCompletionText": require("../src/services/taskCompletionText"),
     "../models/TaskTicket": {
       findById: async () => ticket,
       findByIdAndUpdate: async () => {

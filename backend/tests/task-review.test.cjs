@@ -21,3 +21,18 @@ test('a concurrent guest update prevents closure',async()=>{const f=fixture({cha
 test('missing review returns 404 without writes',async()=>{const f=fixture({exists:false});assert.equal((await f.run()).code,404);assert.equal(f.writes(),0)});
 test('related message lookup is scoped to current stay and ticket snapshot',()=>{const f=fixture();const query=f.service.relatedMessages(f.ticket);assert.equal(query.bookingId,'stay');assert.equal(query.direction,'INBOUND');assert.equal(query.$or[0].ticketId,'ticket');assert.equal(query.$or[1]._id.$in.join(','),'source,update')});
 test('grouped outage review is identified independently of department',()=>{const f=fixture();assert.equal(f.service.isReceptionCategory({category:'Maintenance',staffReviewKey:'STAFF_REVIEW:stay'}),true)});
+
+test('request list reports completion send evidence separately from staff resolution', async () => {
+  const f = fixture();
+  const tickets = ['SENT','UNKNOWN','PENDING','NONE'].map((state,i)=>({_id:String(i),category:'Housekeeping',status:'Resolved',bookingId:'stay'}));
+  const queries=[];
+  const messages={find:query=>{queries.push(query);return {select:()=>({lean:async()=>query.direction==='INBOUND'?[]:
+    ['SENT','UNKNOWN','PENDING'].map((state,i)=>({idempotencyKey:`TASK_DONE:${i}`,deliveryState:state,channel:'WHATSAPP'}))})}}};
+  const result=await f.service.annotateTickets(tickets,messages);
+  assert.equal(result[0].notificationState,'SENT');
+  assert.equal(result[0].notificationChannel,'WHATSAPP');
+  assert.equal(result[1].notificationState,'UNKNOWN');
+  assert.equal(result[2].notificationState,'PENDING');
+  assert.equal(result[3].notificationState,undefined);
+  assert.equal(queries.length,2);
+});
