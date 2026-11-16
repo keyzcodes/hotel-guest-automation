@@ -2,6 +2,7 @@ const transport = require('./guestChannel');
 const TaskTicket = require('../models/TaskTicket');
 const Booking = require('../models/Booking');
 const Message = require('../models/Message');
+const { completionText } = require('./taskCompletionText');
 async function completeTask(id) {
   const ticket = await TaskTicket.findById(id);
   if (!ticket) return { code: 404, success: false, message: 'Request not found.' };
@@ -17,7 +18,7 @@ async function completeTask(id) {
   let ownsSend = false;
   if (!outgoing) {
     try {
-      outgoing = await Message.create({ bookingId: booking._id, channel: transport.channel(), chatId: transport.address(booking), direction: 'OUTBOUND', sender: 'SYSTEM', text: `Our ${ticket.category} team has marked your request as completed:\n\n${ticket.requestText.slice(0, 1200)}\n\nIf you still need help, please reply here.`, idempotencyKey: key, processingStatus: 'NOT_APPLICABLE', deliveryState: 'PENDING' });
+      outgoing = await Message.create({ bookingId: booking._id, channel: transport.channel(), chatId: transport.address(booking), direction: 'OUTBOUND', sender: 'SYSTEM', text: completionText(ticket, booking), idempotencyKey: key, processingStatus: 'NOT_APPLICABLE', deliveryState: 'PENDING' });
       ownsSend = true;
     } catch (error) {
       if (error.code !== 11000) throw error;
@@ -37,6 +38,7 @@ async function completeTask(id) {
       await Message.updateOne({ _id: outgoing._id }, { $set: { deliveryState: 'UNKNOWN', lastError: 'Completion message delivery could not be confirmed.' } }).catch(() => {});
     }
   }
-  return { code: 200, success: true, data: saved, notificationState: outgoing.deliveryState, message: outgoing.deliveryState === 'SENT' ? `Request completed. Confirmation sent to ${transport.channel() === 'WHATSAPP' ? 'WhatsApp' : 'Telegram'}.` : 'Request completed. Guest notification is pending or unconfirmed; check guest chat before sending another message.' };
+  const data = { ...(saved.toObject ? saved.toObject() : saved), notificationState: outgoing.deliveryState, notificationChannel: outgoing.channel };
+  return { code: 200, success: true, data, notificationState: outgoing.deliveryState, message: outgoing.deliveryState === 'SENT' ? `Request completed. Confirmation sent to ${transport.channel() === 'WHATSAPP' ? 'WhatsApp' : 'Telegram'}.` : 'Request completed. Guest notification is pending or unconfirmed; check guest chat before sending another message.' };
 }
 module.exports = { completeTask };

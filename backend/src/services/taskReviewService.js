@@ -26,11 +26,14 @@ async function annotateTickets(tickets, messages = Message) {
   const sourceIds = tickets.flatMap(ticket => [ticket.sourceMessageId, ...(ticket.guestUpdates || []).map(update => update.messageId)]).filter(Boolean);
   // One lookup for the list; avoid a separate database query for every row.
   const handoffs = await messages.find({ direction: 'INBOUND', aiAction: 'HANDOFF', $or: [{ ticketId: { $in: ids } }, { _id: { $in: sourceIds } }] }).select('_id ticketId bookingId').lean();
+  const confirmations = await messages.find({ idempotencyKey: { $in: ids.map(id => `TASK_DONE:${id}`) }, direction: 'OUTBOUND' }).select('idempotencyKey deliveryState channel').lean();
   return tickets.map(ticket => {
     const value = ticket.toObject ? ticket.toObject() : ticket;
     const relatedIds = new Set([ticket.sourceMessageId, ...(ticket.guestUpdates || []).map(update => update.messageId)].filter(Boolean).map(String));
     const hasHandoff = handoffs.some(message => String(message.bookingId) === String(ticket.bookingId) && (String(message.ticketId) === String(ticket._id) || relatedIds.has(String(message._id))));
-    return { ...value, requiresReceptionReview: isReceptionCategory(ticket) || hasHandoff };
+    const confirmation = confirmations.find(message => message.idempotencyKey === `TASK_DONE:${ticket._id}`);
+    return { ...value, requiresReceptionReview: isReceptionCategory(ticket) || hasHandoff,
+      notificationState: confirmation?.deliveryState, notificationChannel: confirmation?.channel };
   });
 }
 async function closeReview(id, dependencies = {}) {

@@ -15,6 +15,8 @@ import styles from "./dashboard.module.css";
 
 type Ticket = {
   requiresReceptionReview?: boolean;
+  notificationState?: string;
+  notificationChannel?: string;
   _id: string;
   bookingId?: string | null;
   guestName: string;
@@ -847,7 +849,7 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
             />
           )}
           {view === "Requests" && (
-            <section className={`${styles.panel} ${styles.inbox}`}>
+            <section className={`${styles.panel} ${styles.inbox} ${styles.requestsWorkspace} ${current ? styles.requestDetailSelected : ""}`}>
               <div className={styles.list}>
                 <div className={styles.inboxTools}>
                   <div className={styles.scopeTabs}>
@@ -891,6 +893,7 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
                 </div>
                 {filtered.map((t) => (
                   <button
+                    aria-pressed={selected === t._id}
                     className={`${styles.requestRow} ${selected === t._id ? styles.selectedRow : ""}`}
                     key={t._id}
                     onClick={() => setSelected(t._id)}
@@ -932,14 +935,14 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
                       </div>
                       <span className={styles.tag}>{current.status}</span>
                     </div>
-                    <div className={styles.messageBubble}>
-                      <small>Guest request · {date(current.createdAt)}</small>
+                    <div className={styles.requestContent}>
                       <p>{current.requestText}</p>
+                      <small>{date(current.createdAt)}</small>
                     </div>
                     <div>
                       {current.guestUpdates?.map((update) => (
                         <div
-                          className={styles.messageBubble}
+                          className={styles.requestFollowup}
                           key={update.messageId}
                         >
                           <small>
@@ -950,33 +953,38 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
                         </div>
                       ))}
                     </div>
-                    <button
+                    {current.status === "Resolved" && (
+                      <div className={styles.requestCompletion} role="status">
+                        <span aria-hidden="true">✓</span>
+                        <div><strong>{current.requiresReceptionReview || ["Front Desk", "General Inquiry"].includes(current.category) ? "Review closed" : "Completed"}</strong>
+                          <small>{current.notificationState === "SENT"
+                            ? `Confirmation sent via ${current.notificationChannel === "WHATSAPP" ? "WhatsApp" : "guest messaging"}`
+                            : current.notificationState === "UNKNOWN" ? "Notification unconfirmed — check the conversation"
+                            : current.notificationState === "PENDING" ? "Guest notification pending"
+                            : "No completion notification confirmed"}</small>
+                        </div>
+                      </div>
+                    )}
+                    <button className={styles.openRequestConversation}
                       onClick={() => {
                         if (current.bookingId) {
                           setConversationTarget(current.bookingId);
                           setView("Conversations");
                         }
-                      }}
-                      disabled={!current.bookingId}
-                    >
+                      }} disabled={!current.bookingId}>
                       Open conversation
                     </button>
-                    <p className={styles.panelNote}>
-                      This is the saved ticket text. Full conversation history
-                      and staff replies are available in Conversations.
-                    </p>
+                    {current.status !== "Resolved" && (requestScope !== "History" || current.requiresReceptionReview) && (
                     <div className={styles.statusActions}>
-                      <button
+                      {requestScope !== "History" && current.status === "Pending" && <button
                         disabled={
-                          saving ||
-                          requestScope === "History" ||
-                          current.status === "In Progress"
+                          saving
                         }
                         className={styles.primary}
                         onClick={() => void changeStatus("In Progress")}
                       >
                         Start handling
-                      </button>
+                      </button>}
                       <button
                         disabled={
                           saving ||
@@ -993,17 +1001,19 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
                           ? "Close review"
                           : "Complete & notify"}
                       </button>
-                      <button
+                      {requestScope !== "History" && current.status !== "Escalated" && <button
                         disabled={
-                          saving ||
-                          requestScope === "History" ||
-                          current.status === "Escalated"
+                          saving
                         }
                         onClick={() => void changeStatus("Escalated")}
                       >
                         Escalate
-                      </button>
+                      </button>}
                     </div>
+                    )}
+                    {current.status !== "Resolved" && requestScope !== "History" && !current.requiresReceptionReview && !["Front Desk", "General Inquiry"].includes(current.category) && (
+                      <p className={styles.completionHint}>Confirm completion only after the requested service has been carried out.</p>
+                    )}
                   </>
                 ) : (
                   <div className={styles.empty}>

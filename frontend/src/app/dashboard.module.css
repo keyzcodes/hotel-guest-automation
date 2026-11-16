@@ -71,3 +71,40 @@
   min-width: 0;
   font-size: 16px;
 }
+
+/* Request workspace: reuse the existing theme; isolate these rules from rooms. */
+.requestsWorkspace{grid-template-columns:minmax(260px,32%) minmax(0,1fr);min-height:500px}
+.requestsWorkspace .list{min-width:0;border-right:1px solid var(--border)}
+.app .requestsWorkspace .requestRow{background:transparent;border-left:3px solid transparent;padding:18px 20px 18px 17px;align-items:flex-start}
+.app .requestsWorkspace .requestRow:hover{background:var(--wash)}
+.app .requestsWorkspace .requestRow[aria-pressed=true]{background:var(--wash);border-left-color:var(--blue)}
+.requestsWorkspace .room{border-radius:10px}
+.requestsWorkspace .requestRow strong{font-size:14px;line-height:1.4}
+.requestsWorkspace .requestRow small{max-width:100%;line-height:1.4;color:var(--muted)}
+.requestsWorkspace .detail{min-width:0;padding:28px}
+.requestsWorkspace .detailHead{margin:0 0 26px;padding-bottom:24px;border-bottom:1px solid var(--border);gap:14px}
+.requestsWorkspace .detailHead h2{font-size:24px;margin:10px 0 8px}
+.requestsWorkspace .detailHead p{margin:0;overflow-wrap:anywhere}
+.requestContent{margin-bottom:28px;overflow-wrap:anywhere}
+.requestContent p{color:var(--text);font-size:18px;line-height:1.6;white-space:pre-wrap;margin:0 0 10px}
+.requestContent small,.requestFollowup small{color:var(--muted);font-size:12px;line-height:1.5}
+.requestFollowup{border-left:2px solid var(--border);padding:8px 14px;margin:14px 0;overflow-wrap:anywhere}
+.requestFollowup p{white-space:pre-wrap;line-height:1.6}
+.requestCompletion{border:1px solid var(--border);border-radius:10px;display:flex;gap:14px;padding:18px;margin:0 0 24px;align-items:center}
+.requestCompletion>span{background:var(--bg);border-radius:50%;width:28px;height:28px;display:grid;place-items:center;flex-shrink:0}
+.requestCompletion strong,.requestCompletion small{display:block;line-height:1.6;overflow-wrap:anywhere}
+.requestCompletion small,.completionHint{color:var(--muted);font-size:12px}
+.completionHint{line-height:1.6;margin:12px 0}
+.requestsWorkspace .statusActions{margin-top:24px;flex-wrap:wrap}
+@media(max-width:899px){
+ .requestsWorkspace{display:block;min-height:360px}
+ .requestsWorkspace .list{border-right:0}
+ .requestsWorkspace .detail{display:none}
+ .requestsWorkspace.requestDetailSelected .list{display:none}
+ .requestsWorkspace.requestDetailSelected .detail{display:block;position:static;inset:auto;overflow:visible;padding:20px}
+ .app .requestsWorkspace .back{display:inline-flex!important;margin-bottom:24px}
+ .requestsWorkspace .requestRow small{max-width:100%}
+ .requestsWorkspace .detailHead{align-items:flex-start}
+ .requestsWorkspace .statusActions button{flex:1 1 140px}
+}
+@media(max-width:359px){.requestsWorkspace .detailHead{flex-wrap:wrap}.requestsWorkspace.requestDetailSelected .detail{padding:16px}.requestContent p{font-size:16px}}
