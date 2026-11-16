@@ -1,6 +1,12 @@
 # Hotel system — working picture and roadmap
 Updated: 16 November 2026
 
+## Deployment automation correction (16 November 2026)
+
+User-reported manual GitHub deployment reached the deployment step but stopped before SSH. Logs showed an empty SSH_KEY and an IMAGE_REF beginning sesora-ci@sha256 rather than ghcr.io. The publishing step incorrectly selected RepoDigests[0]; images can carry multiple repository digests. Implemented locally: select only the digest belonging to the exact published GHCR repository and fail before exposing an invalid deployment output. Add explicit missing-secret messages without printing secret values. Keep server untouched until a successful new workflow run. Configure DEMO_SSH_KEY and DEMO_KNOWN_HOSTS as secrets of GitHub environment demo; verify exact spelling and nonempty values privately. Never copy keys into source/chat.
+
+DEMO_AUTO_DEPLOY must be a repository Actions variable because it is read in the job-level condition, before the demo environment is attached. Keep false until a workflow_dispatch run with deploy_demo=true completes successfully. Host/user/path can remain demo environment variables. Tests: node --test backend/tests/container-publish.test.cjs checks local-first digest ordering, wrong repositories, missing/malformed digests using a simulated Docker command and real Bash. Live SSH/deployment success remains pending. Separate requested single-button service-request simplification and food classification investigation remain deferred until deployment automation works.
+
 ## AWS live verification and five-minute demo polish (16 November 2026)
 
 User-reported live verified: Lightsail Ubuntu AMD64 2 GB instance runs the published release independently of the laptop. Static IP, DuckDNS hostname and Caddy HTTPS configured; phone dashboard login and data navigation passed. WhatsApp encrypted session reused successfully after local receiver stopped. Pre-stay conversation passed Imperial 20-22 Nov, Luxury category change, then Luxury 21-22 Nov with correct prices and retained context. Welcome and two-minute demo reminder arrived. Towel ticket and staff completion notification passed, with local fallback after the in-stay model's eight-second timeout. Separate 503 failures were also observed. GM summary and farewell on AWS remain pending; continuous workload/memory suitability and automatic deployment/rollback rehearsal are not verified. No credentials are recorded here.
