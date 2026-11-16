@@ -88,7 +88,11 @@ jobs:
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           docker tag "sesora-ci:${GITHUB_SHA}" "$ref"
           docker push "$ref"
-          digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$ref")
+          # One image can have multiple digests. Select our pushed repository,
+          # never a local sesora-ci digest left by the build.
+          repository="${ref%:*}"
+          digest=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref" | awk -v prefix="$repository@" 'index($0, prefix) == 1 { print; exit }')
+          [[ "$digest" =~ ^ghcr.io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]] || { echo 'No published GHCR digest found.' >&2; exit 1; }
           printf 'image=%s\n' "$digest" >> "$GITHUB_OUTPUT"
       - name: Clean disposable resources
         if: always()
@@ -124,9 +128,10 @@ jobs:
           DEPLOY_PATH: ${{ vars.DEMO_PATH }}
           IMAGE_REF: ${{ needs.build.outputs.image }}
         run: |
+          test -n "$SSH_KEY" || { echo 'Missing DEMO_SSH_KEY secret in GitHub environment demo.' >&2; exit 1; }
+          test -n "$KNOWN_HOSTS" || { echo 'Missing DEMO_KNOWN_HOSTS secret in GitHub environment demo.' >&2; exit 1; }
           [[ "$SSH_HOST" =~ ^[a-zA-Z0-9.-]+$ && "$SSH_USER" =~ ^[a-zA-Z0-9_-]+$ ]]
           [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ && "$IMAGE_REF" =~ ^ghcr.io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]
-          test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS"
           key=$(mktemp)
           hosts=$(mktemp)
           trap 'rm -f "$key" "$hosts"' EXIT

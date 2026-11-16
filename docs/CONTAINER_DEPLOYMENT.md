@@ -69,7 +69,9 @@ Demo deployment remains **off by default**. Configure the GitHub `demo` environm
 | `DEMO_HOST`, `DEMO_USER`, `DEMO_PATH` | Variables | Linux server and stable deployment checkout |
 | `DEMO_SSH_KEY` | Secret | Dedicated deployment account key |
 | `DEMO_KNOWN_HOSTS` | Secret | Server host key verified independently |
-| `DEMO_AUTO_DEPLOY` | Variable | Set to `true` after a successful manual rehearsal |
+| `DEMO_AUTO_DEPLOY` | Repository Actions variable | Set to `true` after a successful manual rehearsal |
+
+Create DEMO_AUTO_DEPLOY under repository Settings > Secrets and variables > Actions > Variables, not only inside the demo environment: the job condition is evaluated before environment variables are available. Keep it false during setup.
 
 Alternatively, manually run the workflow on `main` with `deploy_demo` checked.
 The workflow uses the stable server-side release script; it does not `git pull`
