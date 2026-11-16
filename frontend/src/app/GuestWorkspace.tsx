@@ -965,14 +965,15 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
                         </div>
                       </div>
                     )}
-                    <button className={styles.openRequestConversation}
+                    <button type="button" className={styles.openRequestConversation}
                       onClick={() => {
                         if (current.bookingId) {
                           setConversationTarget(current.bookingId);
                           setView("Conversations");
                         }
                       }} disabled={!current.bookingId}>
-                      Open conversation
+                      <Icon name="Conversations" />
+                      <span>Open conversation</span>
                     </button>
                     {current.status !== "Resolved" && (requestScope !== "History" || current.requiresReceptionReview) && (
                     <div className={styles.statusActions}>

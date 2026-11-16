@@ -109,7 +109,11 @@
 }
 @media(max-width:359px){.requestsWorkspace .detailHead{flex-wrap:wrap}.requestsWorkspace.requestDetailSelected .detail{padding:16px}.requestContent p{font-size:16px}}
 
-/* Conversation navigation stays accessible without competing with completion. */
-.app .requestsWorkspace .openRequestConversation{border:0;background:transparent;box-shadow:none;padding:8px 0;min-height:44px;color:var(--blue);text-decoration:underline;text-underline-offset:3px;justify-content:flex-start}
-.app .requestsWorkspace .openRequestConversation:hover{background:transparent;text-decoration-thickness:2px}
-.app .requestsWorkspace .openRequestConversation:disabled{color:var(--muted);cursor:default;text-decoration:none}
+/* Quiet secondary navigation; completion remains the primary action. */
+.app .requestsWorkspace .openRequestConversation{border:1px solid var(--border);border-radius:8px;background:transparent;box-shadow:none;padding:10px 14px;min-height:44px;width:fit-content;max-width:100%;gap:8px;color:var(--muted);font-size:14px;font-weight:400;text-decoration:none;justify-content:center;text-align:left;white-space:normal}
+.app .requestsWorkspace .openRequestConversation svg{width:18px;height:18px;flex:0 0 18px}
+.app .requestsWorkspace .openRequestConversation span{min-width:0;overflow-wrap:anywhere}
+.app .requestsWorkspace .openRequestConversation:hover:not(:disabled){background:var(--bg);color:var(--text)}
+.app .requestsWorkspace .openRequestConversation:focus-visible{outline:3px solid var(--blue);outline-offset:3px}
+.app .requestsWorkspace .openRequestConversation:disabled{color:var(--muted);cursor:default}
+@media(max-width:480px){.app .requestsWorkspace .openRequestConversation{width:100%}}
