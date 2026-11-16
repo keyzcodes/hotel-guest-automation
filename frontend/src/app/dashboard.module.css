@@ -108,3 +108,8 @@
  .requestsWorkspace .statusActions button{flex:1 1 140px}
 }
 @media(max-width:359px){.requestsWorkspace .detailHead{flex-wrap:wrap}.requestsWorkspace.requestDetailSelected .detail{padding:16px}.requestContent p{font-size:16px}}
+
+/* Conversation navigation stays accessible without competing with completion. */
+.app .requestsWorkspace .openRequestConversation{border:0;background:transparent;box-shadow:none;padding:8px 0;min-height:44px;color:var(--blue);text-decoration:underline;text-underline-offset:3px;justify-content:flex-start}
+.app .requestsWorkspace .openRequestConversation:hover{background:transparent;text-decoration-thickness:2px}
+.app .requestsWorkspace .openRequestConversation:disabled{color:var(--muted);cursor:default;text-decoration:none}

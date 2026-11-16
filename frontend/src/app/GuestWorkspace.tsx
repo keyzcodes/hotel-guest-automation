@@ -976,16 +976,7 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
                     </button>
                     {current.status !== "Resolved" && (requestScope !== "History" || current.requiresReceptionReview) && (
                     <div className={styles.statusActions}>
-                      {requestScope !== "History" && current.status === "Pending" && <button
-                        disabled={
-                          saving
-                        }
-                        className={styles.primary}
-                        onClick={() => void changeStatus("In Progress")}
-                      >
-                        Start handling
-                      </button>}
-                      <button
+                      <button className={styles.primary}
                         disabled={
                           saving ||
                           (requestScope === "History" &&
@@ -1001,19 +992,10 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
                           ? "Close review"
                           : "Complete & notify"}
                       </button>
-                      {requestScope !== "History" && current.status !== "Escalated" && <button
-                        disabled={
-                          saving
-                        }
-                        onClick={() => void changeStatus("Escalated")}
-                      >
-                        Escalate
-                      </button>}
+
                     </div>
                     )}
-                    {current.status !== "Resolved" && requestScope !== "History" && !current.requiresReceptionReview && !["Front Desk", "General Inquiry"].includes(current.category) && (
-                      <p className={styles.completionHint}>Confirm completion only after the requested service has been carried out.</p>
-                    )}
+
                   </>
                 ) : (
                   <div className={styles.empty}>

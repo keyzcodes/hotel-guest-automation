@@ -1,6 +1,12 @@
 # Hotel system — working picture and roadmap
 Updated: 16 November 2026
 
+## Single-action request completion (16 November 2026)
+
+User approved the minimal service-request flow: receive, fulfil physically, Complete & notify. Implemented locally: remove Start handling and Escalate controls; remaining completion is primary, with no handling prerequisite. Resolved requests show completion/send evidence with no workflow button. Open conversation remains a keyboard-accessible button styled as a quiet text link because it switches an existing workspace view, not a URL. Reception reviews retain Close review and the existing backend requirement for a staff reply; they are not silently treated as physical services. Remove the extra completion instruction from the panel. Existing history restrictions, theme, room colours, backend states and notification logic are unchanged.
+
+Verified: 31 existing frontend tests passed, changed component ESLint passed, production Next.js build passed with --webpack (external workspace dependency links). git diff --check passed. No new backend change, dependency, schema or workflow step; no browser visual run (prior Chromium socket restriction). Patch installation, CI and live single-button verification pending. User reports the corrected manually triggered GitHub-to-AWS deployment passed and the dashboard opens afterward. Repository DEMO_AUTO_DEPLOY=true was instructed; its saved value and the first merge-triggered automatic deployment still need confirmation. The small UI patch is the intended next automatic-release test. Food typo/general-inquiry classification remains separate pending investigation. No live server modification, push or merge performed here.
+
 ## Deployment automation correction (16 November 2026)
 
 User-reported manual GitHub deployment reached the deployment step but stopped before SSH. Logs showed an empty SSH_KEY and an IMAGE_REF beginning sesora-ci@sha256 rather than ghcr.io. The publishing step incorrectly selected RepoDigests[0]; images can carry multiple repository digests. Implemented locally: select only the digest belonging to the exact published GHCR repository and fail before exposing an invalid deployment output. Add explicit missing-secret messages without printing secret values. Keep server untouched until a successful new workflow run. Configure DEMO_SSH_KEY and DEMO_KNOWN_HOSTS as secrets of GitHub environment demo; verify exact spelling and nonempty values privately. Never copy keys into source/chat.
