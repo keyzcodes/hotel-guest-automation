@@ -1,6 +1,12 @@
 # Hotel system — working picture and roadmap
 Updated: 17 November 2026
 
+## Full-CI Mongo regression alignment — 17 November 2026
+
+User-reported full GitHub backend run: 311 tests, 309 passed, one failed, one skipped. Failure was enquiry-session-mongodb.test.cjs line 78: expected two model calls after replay, actual one. The test retained the pre-optimisation expectation of an availability interpretation followed by an AI wording call. The implemented terminal availability path correctly uses one model call, while replay remains ignored. No production defect is established by that assertion failure.
+
+Test-only correction: assert one call after the first genuine availability message, still one call and one reply after replay with unchanged session version, then two total calls and two replies after a second genuine message. Existing live Mongo room mutation must still change the reply from available to unavailable; reservation and approval-enquiry creation remain prohibited. Runtime code unchanged. No full-CI pass claimed until GitHub reruns. Local syntax and patch checks passed; Mongo-dependent tests skip without PMS_TEST_URI. Keep PR unmerged until full backend/frontend/container checks pass.
+
 ## Neutral closing-question evaluator alignment — 17 November 2026
 
 User-reported latest changes journey passed mechanics and provisional semantic review for all nine turns, median 1864 ms and maximum 5772 ms, no over-ten-second turns. The subsequent conversation journey stopped before the critic: thanks received a neutral Anything else I can help with question, and the backend correctly stored it as OPEN, but the old mechanics assertion required pendingQuestion to stay null. The shown reply did not request booking details or create an availability action. This failure reflects an outdated test-state expectation, not proof of an application failure.
