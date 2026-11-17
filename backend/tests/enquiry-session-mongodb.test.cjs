@@ -72,14 +72,18 @@ test('WhatsApp routes to the saved agent session, rechecks live rooms and ignore
     const room = await Room.create({ number: '201', category: 'Imperial', housekeeping: 'READY' });
     await send('first');
     assert.match(replies[0], /Imperial is available/);
+    assert.equal(calls, 1, 'A genuine availability message needs one model call');
     assert.equal(await Session.countDocuments(), 1);
     const before = await Session.findOne().lean();
     await send('first');
-    assert.equal(replies.length, 1); assert.equal(calls, 2);
+    assert.equal(replies.length, 1);
+    assert.equal(calls, 1, 'Replay must not make another model call');
     assert.equal((await Session.findOne().lean()).version, before.version);
     await Room.updateOne({ _id: room._id }, { $set: { outOfOrder: true } });
     await send('second');
     assert.match(replies[1], /Imperial isn’t available/);
+    assert.equal(replies.length, 2);
+    assert.equal(calls, 2, 'A second genuine message must perform a fresh check');
     assert.equal(await Reservation.countDocuments(), 0);
     assert.equal(await Enquiry.countDocuments(), 0);
   } finally {

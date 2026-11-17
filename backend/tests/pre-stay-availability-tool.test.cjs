@@ -27,8 +27,8 @@ test('one inventory lookup prices available categories and distinguishes capacit
   });
   assert.equal(calls, 1);
   assert.deepEqual(result.categories, [
-    { category: 'Imperial', status: 'UNAVAILABLE' },
-    { category: 'Luxury', status: 'AVAILABLE', currency: 'NGN', totalMinor: 22000000, depositMinor: 11000000 },
+    { category: 'Imperial', status: 'UNAVAILABLE', availableCount: 0, requestedRooms: 1, capacity: 2 },
+    { category: 'Luxury', status: 'AVAILABLE', currency: 'NGN', totalMinor: 22000000, depositMinor: 11000000, availableCount: 1, requestedRooms: 1, capacity: 2 },
     { category: 'Deluxe', status: 'UNKNOWN_CATEGORY' },
   ]);
   const tooManyGuests = await checkRoomAvailability({ ...args, guests: 3 }, settings, now, async () => []);

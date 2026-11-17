@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { initialState } = require('../src/services/enquiryState');
 const { evaluate, scenarios } = require('../scripts/eval-enquiry-agent.cjs');
 const { reviewBehaviour, validateReview } = require('../scripts/enquiry-behaviour-review.cjs');
 const journey = { id: 'synthetic', turns: [{ text: 'Thanks', check: c => assert.equal(c.lookups, 0) }] };
@@ -50,8 +51,8 @@ test('semantic failures can reject fluent paraphrases even when every mechanical
     reviewer: async transcript => {
       assert.equal(transcript.length, 3);
       assert.match(transcript[0].expectation, /Do not collect/);
-      return { turns: transcript.map((row, index) => ({ turn: row.turn, verdict: 'FAIL',
-        reason: 'Introduces unnecessary booking-detail collection instead of satisfying the current request.', evidence: observedReplies[index] })) };
+      return { turns: transcript.map((row, index) => ({ turn: row.turn, verdict: index === 1 ? 'PASS' : 'FAIL',
+        reason: index === 1 ? 'Backend removed the unsupported room-type preamble.' : 'Introduces unnecessary booking-detail collection instead of satisfying the current request.', evidence: index === 1 ? '' : row.reply })) };
     } });
   assert.deepEqual(result, { ...base, mechanicsPassed: 1, behaviouralFailed: 1, failed: 1 });
 });
@@ -96,4 +97,73 @@ test('critic evidence must cover each turn once and quote genuine text for failu
   const row = { turn: 1, verdict: 'FAIL', reason: 'Issue', evidence: 'Welcome.' };
   assert.throws(() => validateReview({ turns: [row, row] }, transcript));
   assert.throws(() => validateReview({ turns: [{ ...row, evidence: '' }, { ...row, turn: 2, evidence: 'Thanks.' }] }, transcript));
+});
+
+test('review failures expose safe reason codes while remaining unreviewed', async () => {
+  for (const [error, reason] of [
+    [new SyntaxError('Private model output must not be printed'), 'invalid_json'],
+    [Error('Incomplete behaviour review'), 'incomplete_review'],
+    [Error('Invalid behaviour review evidence'), 'invalid_evidence'],
+    [Object.assign(Error('Private provider details'), { name: 'AiDeadlineError' }), 'deadline'],
+  ]) {
+    const messages = [];
+    const result = await evaluate({ selected: [journey], gapMs: 0, log: { log: text => messages.push(text) },
+      provider: async () => reply('You’re welcome.'), reviewer: async () => { throw error; } });
+    assert.equal(result.reviewRequired, 1);
+    assert.equal(result.behaviouralPassed, 0);
+    assert.ok(messages.some(text => text.includes(`reason=${reason}`)));
+    assert.ok(messages.every(text => !text.includes('Private')));
+  }
+});
+
+test('critic receives authoritative fixture rates to assess the price-comparison claim', async () => {
+  let received = false;
+  const result = await evaluate({ selected: [journey], gapMs: 0, log: quiet, provider: async () => reply('You’re welcome.'),
+    reviewer: async transcript => {
+      const facts = transcript[0].verifiedFixtureFacts;
+      assert.equal(facts.currency, 'NGN');
+      const highest = facts.roomRates.reduce((a, b) => a.nightlyMinor > b.nightlyMinor ? a : b);
+      assert.equal(highest.category, 'Junior Suite');
+      assert.match(facts.source, /Synthetic evaluator configuration/);
+      received = true;
+      return positive(transcript);
+    } });
+  assert.equal(received, true);
+  assert.equal(result.behaviouralPassed, 1);
+});
+
+test('strict critic diagnostics locate bad quotes without changing acceptance rules', () => {
+  const transcript = [{ turn: 1, reply: 'Hello! How can I help?' }];
+  const review = (verdict, evidence) => ({ turns: [{ turn: 1, verdict, reason: 'Synthetic review', evidence }] });
+  for (const [value, code] of [
+    [review('FAIL', ''), 'FAIL_WITHOUT_QUOTE'],
+    [review('FAIL', 'A paraphrase'), 'QUOTE_NOT_IN_REPLY'],
+    [review('PASS', 'A paraphrase'), 'QUOTE_NOT_IN_REPLY'],
+    [review('PASS', 42), 'INVALID_EVIDENCE_FIELD'],
+  ]) {
+    assert.throws(() => validateReview(value, transcript), error => error.reviewCode === code && error.reviewTurn === 1);
+  }
+  assert.equal(validateReview(review('PASS', ''), transcript).verdict, 'PASS');
+  assert.equal(validateReview(review('FAIL', 'How can I help?'), transcript).verdict, 'FAIL');
+});
+
+test('critic failure logs expose only allowlisted diagnostic codes and turn numbers', async () => {
+  const messages = [];
+  const result = await evaluate({ selected: [journey], gapMs: 0, log: { log: text => messages.push(text) }, provider: async () => reply('You’re welcome.'),
+    reviewer: async transcript => validateReview({ turns: [{ turn: 1, verdict: 'FAIL', reason: 'Synthetic', evidence: 'Private invented quote' }] }, transcript) });
+  assert.equal(result.reviewRequired, 1);
+  assert.equal(result.behaviouralPassed, 0);
+  assert.ok(messages.some(text => text.includes('detail=QUOTE_NOT_IN_REPLY; turn=1')));
+  assert.ok(messages.every(text => !text.includes('Private invented quote')));
+});
+
+test('conversation closing tracks the visible neutral question without requiring a hidden null', () => {
+  const closing = scenarios(new Date())[0].turns[2];
+  const before = initialState();
+  const message = "You're very welcome! Is there anything else I can help you with today?";
+  const state = { ...before, pendingQuestion: message, pendingQuestionKind: 'OPEN' };
+  closing.check({ state, before, tools: ['replyToGuest'], lookups: 0, reply: message });
+  assert.throws(() => closing.check({ state: { ...state, stay: { guests: 2 } }, before, tools: ['replyToGuest'], lookups: 0, reply: message }));
+  assert.throws(() => closing.check({ state: { ...state, pendingQuestion: 'Hidden question?' }, before, tools: ['replyToGuest'], lookups: 0, reply: message }));
+  assert.throws(() => closing.check({ state, before, tools: ['checkAvailability'], lookups: 1, reply: message }));
 });

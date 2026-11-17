@@ -73,7 +73,7 @@ test('selected, all, alternatives and date-only changes survive session reloads'
 test('explicit reset clears the quote and preferences; this phase has no booking tools', async () => {
   const store = memory(seed);
   const { result } = await run(store, [call('updateEnquiry', { expectedVersion: 0, reset: true }), reply('Let’s start again. What would you like to know?')]);
-  assert.deepEqual(store.snapshot().state, initialState());
+  assert.deepEqual(store.snapshot().state, { ...initialState(), pendingQuestion: 'Let’s start again. What would you like to know?', pendingQuestionKind: 'OPEN' });
   assert.match(result.reply, /start again/);
   const { tools } = require('../src/services/enquiryAgentContract');
   assert.equal(tools.some(tool => /reserv|payment|checkout/i.test(tool.name)), false);
@@ -99,7 +99,7 @@ test('missing dates do not query inventory or invent a stay', async () => {
   assert.deepEqual(store.snapshot().state.stay, {});
 });
 
-test('all model rounds share the original budget, and verified results survive wording failure', async () => {
+test('verified inventory completes immediately without a final provider call', async () => {
   const store = memory(seed); let clock = 0, calls = 0;
   const { result, requests } = await run(store, [], {
     clock: () => clock,
@@ -108,7 +108,7 @@ test('all model rounds share the original budget, and verified results survive w
       assert.equal(request.timeoutMs, 14000); throw Object.assign(Error('Provider down'), { status: 503 });
     }, budgetMs: 20000,
   });
-  assert.equal(calls, 2); assert.match(result.reply, /Standard is available/); assert.equal(result.fallback, undefined);
+  assert.equal(calls, 1); assert.match(result.reply, /Standard is available/); assert.equal(result.fallback, undefined);
 });
 
 test('provider failure before any tool preserves the enquiry', async () => {

@@ -14,6 +14,13 @@ const keysOnly = (value, keys) => plain(value) && Object.keys(value).every(key =
 function hotelFacts(topic, settings) {
   if (topic === 'ROOM_TYPES') return { categories: (settings.roomRates ?? []).map(({ category, capacity }) => ({ category, capacity })),
     text: 'Room types: ' + (settings.roomRates ?? []).map(rate => rate.category).join(', ') + '.' };
+  if (topic === 'ROOM_COMPARISON') {
+    const rates = (settings.roomRates ?? []).filter(rate => Number.isSafeInteger(rate.nightlyMinor) && rate.nightlyMinor > 0);
+    if (!rates.length) return { text: 'Room category comparisons have not been configured.' };
+    const highestPrice = Math.max(...rates.map(rate => rate.nightlyMinor));
+    const categories = rates.filter(rate => rate.nightlyMinor === highestPrice).map(rate => rate.category);
+    return { categories, text: `By listed nightly price, the most expensive ${categories.length === 1 ? 'category is' : 'categories are'} ${categories.join(' and ')}. For a comparison of room sizes and amenities, please check with reception. Availability depends on your dates.` };
+  }
   if (topic === 'POLICIES') return { text: `Standard check-in ${policyTime(settings.checkInTime)} · Checkout ${policyTime(settings.checkOutTime)} (WAT).` +
     (settings.policies?.cancellation ? '\n' + settings.policies.cancellation : '') };
   if (topic === 'AMENITIES') return { text: settings.amenities?.length ? settings.amenities.join(', ') + '.' : 'Amenities have not been configured.' };
@@ -52,16 +59,17 @@ async function runEnquiryAgent({ text, history = [], workflow, session, timing, 
   async function execute(call) {
     const args = call.args ?? {};
     if (call.name === 'replyToGuest') {
-      if (!keysOnly(args, ['message', 'resultIds', 'pendingQuestion', 'recapEnquiry']) || typeof args.message !== 'string' || args.message.length > 750 ||
+      if (!keysOnly(args, ['message', 'resultIds', 'pendingQuestion', 'pendingQuestionKind', 'recapEnquiry']) || typeof args.message !== 'string' || args.message.length > 750 ||
           !Array.isArray(args.resultIds) || args.resultIds.length > 4 || args.resultIds.some(id => typeof id !== 'string' || !results.has(id)) ||
           (args.pendingQuestion !== undefined && args.pendingQuestion !== null && (typeof args.pendingQuestion !== 'string' || !args.pendingQuestion.trim() || args.pendingQuestion.length > 300))) {
         return { status: 'INVALID_REPLY', instruction: 'Use only result IDs returned this turn and a short message.' };
       }
+      if (args.pendingQuestionKind !== undefined && ![null, 'OPEN', 'YES_NO', 'CHOICE'].includes(args.pendingQuestionKind)) return { status: 'INVALID_REPLY' };
       if (args.recapEnquiry !== undefined && typeof args.recapEnquiry !== 'boolean') return { status: 'INVALID_REPLY' };
       const progress = [...results.values()].some(item => item.status === 'PROGRESS');
       if (args.recapEnquiry || (progress && !lastAvailabilityId)) {
         const rendered = recap(state);
-        if (state.pendingQuestion !== rendered.question) await save({ ...state, pendingQuestion: rendered.question });
+        if (state.pendingQuestion !== rendered.question || !state.pendingQuestionKind) await save({ ...state, pendingQuestion: rendered.question, pendingQuestionKind: rendered.questionKind });
         return { final: outcome(rendered.text, { enquiryProgressUsed: true }) };
       }
       // A recap containing concrete saved stay facts needs a backend result or the
@@ -71,18 +79,32 @@ async function runEnquiryAgent({ text, history = [], workflow, session, timing, 
         .some(value => args.message.toLowerCase().includes(value.toLowerCase()));
       if (stayFact && !args.resultIds.length && !lastAvailabilityId) return { status: 'UNGROUNDED_REPLY',
         instruction: 'Display facts through a tool result, or set recapEnquiry true to render the saved enquiry with one clear next question. Do not write stay facts directly in message.' };
+      const declarativeFact = !args.message.trim().endsWith('?') && (
+        /(?:₦|\bNGN\b|\b(?:highest|most expensive|capacity)\b)/i.test(args.message) || /\brooms?\b.{0,40}\b(?:available|unavailable)\b/i.test(args.message) ||
+        (settings.roomRates ?? []).some(rate => args.message.toLowerCase().includes(rate.category.toLowerCase())));
+      if (declarativeFact && !args.resultIds.length && !lastAvailabilityId) return { status: 'UNGROUNDED_REPLY',
+        instruction: 'Use a current information/availability result for hotel facts. Social replies must not assert inventory, ranking or prices.' };
       const ids = new Set(args.resultIds);
       // Always deliver the latest verified availability result even if the model omits it.
       if (lastAvailabilityId) ids.add(lastAvailabilityId);
-      const reply = [lastAvailabilityId ? '' : args.message.trim(), ...[...ids].map(id => results.get(id).text)].filter(Boolean).join('\n\n');
+      // Information facts are rendered by the backend too: arbitrary connective
+      // text must not add an invented ranking, price or inventory claim.
+      const information = [...results.values()].some(item => item.status === 'INFORMATION');
+      if (information && !args.resultIds.length && !lastAvailabilityId) return { status: 'INVALID_REPLY', instruction: 'Display the information result ID.' };
+      const reply = [lastAvailabilityId || information ? '' : args.message.trim(), ...[...ids].map(id => results.get(id).text)].filter(Boolean).join('\n\n');
       if (!reply) return { status: 'INVALID_REPLY' };
-      if (args.pendingQuestion !== undefined && args.pendingQuestion !== state.pendingQuestion) {
-        await save({ ...state, pendingQuestion: args.pendingQuestion });
+      // Persist the question actually visible, even when the model omitted its metadata.
+      const visibleQuestion = !information && args.message.trim().endsWith('?') ? args.message.trim() : undefined;
+      const pendingQuestion = lastAvailabilityId ? state.pendingQuestion : information ? null : visibleQuestion ?? args.pendingQuestion;
+      const pendingQuestionKind = lastAvailabilityId ? state.pendingQuestionKind : pendingQuestion
+        ? args.pendingQuestionKind ?? (!visibleQuestion && pendingQuestion === state.pendingQuestion ? state.pendingQuestionKind : 'OPEN') : null;
+      if (pendingQuestion !== undefined && (pendingQuestion !== state.pendingQuestion || pendingQuestionKind !== state.pendingQuestionKind)) {
+        await save({ ...state, pendingQuestion, pendingQuestionKind });
       }
       return { final: outcome(reply) };
     }
     if (call.name === 'getHotelInformation') {
-      if (!keysOnly(args, ['topic']) || !['ROOM_TYPES', 'POLICIES', 'AMENITIES', 'HOTEL'].includes(args.topic)) return { status: 'INVALID_ARGUMENTS' };
+      if (!keysOnly(args, ['topic']) || !['ROOM_TYPES', 'POLICIES', 'AMENITIES', 'HOTEL', 'ROOM_COMPARISON'].includes(args.topic)) return { status: 'INVALID_ARGUMENTS' };
       return remember({ status: 'INFORMATION', ...hotelFacts(args.topic, settings) });
     }
     if (call.name === 'getEnquiryProgress') {
@@ -126,17 +148,28 @@ async function runEnquiryAgent({ text, history = [], workflow, session, timing, 
       const discussed = [...new Set([...state.discussedCategories,
         ...checked.discussed])];
       await save({ ...state, stage: checked.hasOffer ? 'QUOTED' : 'EXPLORING',
-        pendingQuestion: checked.nextQuestion, discussedCategories: discussed, policySignature: checked.policySignature,
+        pendingQuestion: checked.nextQuestion, pendingQuestionKind: checked.nextQuestionKind, discussedCategories: discussed, policySignature: checked.policySignature,
         lastQuote: { checkedAt: now.toISOString(), expiresAt: new Date(+now + (settings.quoteMinutes || 30) * 60000).toISOString(), result: checked } });
     } else if (state.lastQuote) {
       await save({ ...state, stage: 'EXPLORING', lastQuote: null });
     }
     const result = remember({ ...checked, createsHold: false });
     lastAvailabilityId = result.resultId;
+    // The formatter already produced the authoritative answer. Avoid a second
+    // provider call merely to say replyToGuest after successful inventory lookup.
+    if (checked.status === 'CHECKED') return { ...result, final: outcome(checked.text) };
     return result;
   }
   try {
     if (process.env.USE_MOCK_AI === 'true' && generate === generateGuestModelResponse) throw Error('Live AI disabled');
+    // A bare affirmation cannot answer an open invitation. Do not infer a room
+    // selection from older history or spend a model call inventing an action.
+    const bareAffirmation = /^(?:yes|yeah|yep|ok(?:ay)?|sure)[.!?…\s]*$/iu.test(text.trim());
+    if (bareAffirmation && (!state.pendingQuestion || !['YES_NO', 'CHOICE'].includes(state.pendingQuestionKind))) {
+      const question = 'What would you like help with?';
+      await save({ ...state, pendingQuestion: question, pendingQuestionKind: 'OPEN' });
+      return outcome(question);
+    }
     for (let round = 0; round < 6; round++) {
       const remaining = Math.floor(budgetMs - (clock() - started));
       if (remaining < 1000) throw Object.assign(Error('Agent budget exhausted'), { name: 'AiDeadlineError' });
@@ -157,8 +190,10 @@ async function runEnquiryAgent({ text, history = [], workflow, session, timing, 
         ...(['checkAvailability', 'updateEnquiry'].includes(call.name) ? {
           requestedScope: ['ALL', 'SELECTED', 'ALTERNATIVES', 'KEEP_CURRENT'].includes(call.args?.selection?.scope) ? call.args.selection.scope : null,
           resolvedScope: state.roomPreference.scope,
+          ...(result.reason ? { validationReason: result.reason } : {}),
           preferencePreserved: call.args?.selection?.scope !== 'KEEP_CURRENT' && call.args?.selection?.scope !== state.roomPreference.scope,
           selectedCategories: state.roomPreference.categories,
+          roomCount: state.stay.roomCount ?? 1, guestCount: state.stay.guests ?? null,
           checkedCategories: result.checkedCategories ?? result.categories?.map(item => item.category),
         } : {}),
       });

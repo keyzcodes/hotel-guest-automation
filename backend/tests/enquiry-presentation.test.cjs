@@ -68,9 +68,11 @@ test('inline resume is grounded, uses one model request and asks one unambiguous
     lookup: () => assert.fail('A recap does not recheck availability'),
   });
   assert.equal(calls, 1); assert.equal(outcome.enquiryProgressUsed, true);
-  assert.match(outcome.reply, /Imperial/); assert.match(outcome.reply, /fresh check/);
+  assert.match(outcome.reply, /Imperial/); assert.match(outcome.reply, /Would you like me to check availability again/);
+  assert.doesNotMatch(outcome.reply, /needs a fresh check/);
   assert.equal((outcome.reply.match(/\?/g) ?? []).length, 1);
-  assert.equal(saved.pendingQuestion, 'Shall I check availability again?');
+  assert.equal(saved.pendingQuestion, 'Would you like me to check availability again?');
+  assert.equal(saved.pendingQuestionKind, 'YES_NO');
 });
 
 test('free-text recap must be grounded and the progress tool also yields one clear question', async () => {
