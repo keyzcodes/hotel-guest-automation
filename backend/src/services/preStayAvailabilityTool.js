@@ -12,6 +12,7 @@ const tool = {
       arrivalDate: { type: 'string', description: 'Check-in date in YYYY-MM-DD, Lagos time.' },
       departureDate: { type: 'string', description: 'Checkout date in YYYY-MM-DD, Lagos time.' },
       guests: { type: 'integer', minimum: 1, maximum: 99 },
+      roomCount: { type: 'integer', minimum: 1, maximum: 99 },
       reuseLastStay: {
         type: 'boolean',
         description: 'True when continuing the same enquiry. Supply changed fields only; the backend keeps the other saved dates, guests and categories. False for a new or unrelated enquiry.',
@@ -126,13 +127,16 @@ async function checkRoomAvailability(args, settings, now, lookup = availableRoom
   const arrivalDate = args.arrivalDate === undefined ? continuingStay?.arrivalDate : args.arrivalDate;
   const departureDate = args.departureDate === undefined ? continuingStay?.departureDate : args.departureDate;
   const guests = args.guests === undefined ? continuingStay?.guests : args.guests;
+  const roomCount = args.roomCount ?? continuingStay?.roomCount ?? 1;
+  if (!Number.isInteger(roomCount) || roomCount < 1 || roomCount > 99) return { status: 'INVALID_REQUEST', reason: 'INVALID_ROOM_COUNT' };
+  const explicitRooms = args.roomCount !== undefined || continuingStay?.roomCount !== undefined;
   const missing = [
     ...(!arrivalDate ? ['arrivalDate'] : []),
     ...(!departureDate ? ['departureDate'] : []),
-    ...(guests === undefined ? ['guests'] : []),
+    ...(guests === undefined && !explicitRooms ? ['guests'] : []),
   ];
   if (missing.length) return { status: 'INVALID_REQUEST', reason: 'MISSING_DETAILS', missing };
-  if (!Number.isInteger(guests) || guests < 1 || guests > 99) {
+  if (guests !== undefined && (!Number.isInteger(guests) || guests < 1 || guests > 99)) {
     return { status: 'INVALID_REQUEST', reason: 'INVALID_GUEST_COUNT' };
   }
   const range = stayRange({ arrivalDate, departureDate }, settings, now);
@@ -142,26 +146,38 @@ async function checkRoomAvailability(args, settings, now, lookup = availableRoom
     if (!Array.isArray(settings.roomRates) || !settings.roomRates.length) throw Error('Missing room rates');
     const rates = new Map(settings.roomRates.map(rate => [categoryKey(rate.category), rate]));
     const sameStay = continuingStay?.arrivalDate === arrivalDate &&
-      continuingStay.departureDate === departureDate && continuingStay.guests === guests;
+      continuingStay.departureDate === departureDate && continuingStay.guests === guests && (continuingStay.roomCount ?? 1) === roomCount;
     const discussed = new Set(sameStay ? (continuingStay.checkedCategories ?? []).map(categoryKey) : []);
     const excluded = mode === 'ALTERNATIVES' ? discussed : new Set();
     const names = requestedCategories ?? [...rates.values()].map(rate => rate.category).filter(name => !excluded.has(categoryKey(name)));
     const requested = new Map(names.map(category => [categoryKey(category), category.trim()]));
-    const rooms = new Set(requested.size ? (await lookup(range)).map(room => categoryKey(room.category)) : []);
+    const rooms = new Map();
+    const seen = new Set();
+    for (const [index, room] of (requested.size ? await lookup(range) : []).entries()) {
+      const identity = String(room._id ?? room.number ?? `fixture-${index}`);
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      const key = categoryKey(room.category);
+      rooms.set(key, (rooms.get(key) ?? 0) + 1);
+    }
     const categories = [...requested].map(([key, name]) => {
       const rate = rates.get(key);
       if (!rate) return { category: name, status: 'UNKNOWN_CATEGORY' };
       const category = rate.category;
       if (!Number.isInteger(rate.capacity) || rate.capacity < 1) throw Error('Invalid room capacity');
-      if (guests > rate.capacity) return { category, status: 'CAPACITY_EXCEEDED', capacity: rate.capacity };
-      if (!rooms.has(key)) return { category, status: 'UNAVAILABLE' };
+      const availableCount = rooms.get(key) ?? 0;
+      const inventory = { availableCount, requestedRooms: roomCount, capacity: rate.capacity };
+      if (guests !== undefined && guests > rate.capacity * roomCount) return { category, status: 'CAPACITY_EXCEEDED', ...inventory };
+      if (!availableCount) return { category, status: 'UNAVAILABLE', ...inventory };
+      if (availableCount < roomCount) return { category, status: 'INSUFFICIENT_ROOMS', ...inventory };
       if (!Number.isSafeInteger(rate.nightlyMinor) || rate.nightlyMinor <= 0) throw Error('Invalid room rate');
       const { currency, totalMinor, depositMinor } = approvedQuote(settings, range, rate, now);
-      return { category, status: 'AVAILABLE', currency, totalMinor, depositMinor };
+      if (!Number.isSafeInteger(totalMinor * roomCount) || !Number.isSafeInteger(depositMinor * roomCount)) throw Error('Invalid multi-room total');
+      return { category, status: 'AVAILABLE', currency, totalMinor: totalMinor * roomCount, depositMinor: depositMinor * roomCount, ...inventory };
     });
     return {
       status: 'CHECKED', categories, nights: range.nights, dates: datesText(range),
-      arrivalDate, departureDate, guests, mode,
+      arrivalDate, departureDate, guests, roomCount, mode,
       checkInLabel: policyTime(settings.checkInTime), checkOutLabel: policyTime(settings.checkOutTime),
       previouslyChecked: [...rates].filter(([key]) => discussed.has(key)).map(([, rate]) => rate.category),
     };
@@ -198,6 +214,7 @@ function renderResult(result, options, mode) {
       const labels = { arrivalDate: 'check-in date', departureDate: 'checkout date', guests: 'guest count' };
       return `Could you confirm your ${result.missing.map(field => labels[field]).join(' and ')}?`;
     }
+    if (result.reason === 'INVALID_ROOM_COUNT') return 'How many rooms would you like?';
     if (result.reason === 'INVALID_GUEST_COUNT') return 'How many guests will be staying?';
     if (result.reason === 'INVALID_DATES') return 'Could you confirm your arrival and departure dates? Checkout must be after check-in.';
     if (result.reason === 'MISSING_CATEGORIES') return 'Which room categories would you like me to check?';
@@ -209,11 +226,12 @@ function renderResult(result, options, mode) {
     if (!options.length) return `I couldn’t find any other room options for ${result.dates}. Would you like me to check different dates?`;
   }
   const lines = options.map(item => {
+    if (item.status === 'INSUFFICIENT_ROOMS') return `${item.category}: ${item.availableCount} rooms available; ${item.requestedRooms} requested.`;
     if (item.status === 'UNKNOWN_CATEGORY') return `${item.category} isn’t listed as a room category.`;
-    if (item.status === 'CAPACITY_EXCEEDED') return `${item.category} fits up to ${item.capacity} guests.`;
+    if (item.status === 'CAPACITY_EXCEEDED') return `${item.category} fits up to ${item.capacity} guests per room (${item.requestedRooms ?? 1} rooms requested).`;
     if (item.status === 'UNAVAILABLE') return `${item.category} isn’t available for those dates.`;
     const price = new Intl.NumberFormat('en-NG', { style: 'currency', currency: item.currency, maximumFractionDigits: item.totalMinor % 100 ? 2 : 0 }).format(item.totalMinor / 100);
-    return `${item.category} is available at ${price} total.`;
+    return `${item.category} is available at ${price} total${result.roomCount > 1 ? ` for ${result.roomCount} rooms` : ''}.`;
   });
   const next = options.some(item => item.status === 'AVAILABLE') ? ' Reception can help you book.' : '';
   return `For ${result.dates} (${result.nights} ${result.nights === 1 ? 'night' : 'nights'}):\n${lines.join('\n')}${next}\nStandard check-in ${result.checkInLabel} · Checkout ${result.checkOutLabel} (WAT).`;
