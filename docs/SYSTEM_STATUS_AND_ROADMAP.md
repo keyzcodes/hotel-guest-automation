@@ -1,5 +1,19 @@
 # Hotel system — working picture and roadmap
-Updated: 17 November 2026
+Updated: 18 November 2026
+
+## Owner-first mobile follow-up — 18 November 2026
+
+Follow-up to the uncommitted unified-dashboard patch: mobile/tablet bottom navigation is Overview, Reports, Rooms, Requests and More in one row. More opens Conversations and Stays, closes on selection/outside click/Escape, and highlights when a secondary section is selected. Desktop retains all six direct sidebar links. Recorded finances now precede guest metrics on Overview at every width; the existing financial period, privacy control, recorded-difference labels and report permissions are retained. No new occupancy metric or accounting-profit claim is introduced. Existing room availability remains accessible in Rooms. This is a local UI change, not a live deployment. Actual device visual verification is pending.
+
+## Unified responsive navigation candidate — 18 November 2026
+
+User reported that reporting code is present in the deployed image. A demo GM account was created with the existing demo login and staff accounts and reporting were enabled. The reporting shell then grouped core destinations under Guests. This is user-reported activation, not independent server verification.
+
+Implemented separately from main c750e0dcda913ff2de1646eb2e12c3395ff025d5: Overview, Conversations, Requests, Stays, Rooms and Reports in one navigation. The shared shell controls the embedded guest screen and hides its nested menu. Internal guest actions update the outer section; legacy Guests bookmarks resume Stays. Overview metrics open their corresponding screens. Authenticated module selection, GM-only staff management, offline financial entry handling and existing operational handlers are retained. No experimental AI changes, database changes or server secrets are included.
+
+Phone navigation uses three columns/two rows, tablet navigation uses six columns and desktop uses a sidebar. Content padding clears the fixed navigation and safe area; financial totals can wrap and phone text inputs use 16px. Existing responsive room, request, chat and report layouts are reused. Overview retains its existing 60-second and visibility refresh; this change does not promise instantaneous reporting updates.
+
+Local verification: all 32 frontend tests and targeted ESLint passed. Next.js webpack production build completed, including TypeScript and prerendering. The build flagged an existing Next.js security advisory; dependency remediation remains a separate follow-up. Browser viewport testing was blocked by Chromium process-singleton socket restrictions. Full GitHub CI, live deployment and visual acceptance on actual phone/tablet/desktop remain pending. Verify section navigation, requests, check-in/checkout, report filters and entry forms, including phone landscape and keyboard-open views, before demo acceptance.
 
 ## Full-CI Mongo regression alignment — 17 November 2026
 

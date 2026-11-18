@@ -101,3 +101,32 @@ dialog.overlay:not([open]){display:none}
 .dailyPair{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:20px 0}.dailyPair strong{display:block;margin-top:8px;font-size:20px;overflow-wrap:anywhere}
 .combinedGrid{display:grid;gap:17px;align-items:start}
 @media(min-width:760px){.combinedDrawer{width:min(760px,100%)}.combinedGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.dailyHead,.shell .dailyRow{grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) 16px;gap:18px;padding:16px 20px}.dailyRow>span{font-size:14px}}
+
+/* Unified workspaces: six direct destinations, with no nested Guests menu. */
+.header>strong,.brand{min-width:0;overflow-wrap:anywhere}.profile{flex-shrink:0}
+.bottomNav a{min-width:0;min-height:52px;justify-content:center;text-align:center;line-height:1.25}
+.bottomNav svg,.sidebar svg{flex-shrink:0}
+@media(max-width:759px){
+ .bottomNav{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;padding-top:4px}
+ .bottomNav a{padding:6px 2px;gap:3px;font-size:11px}
+ .bottomNav svg{width:18px;height:18px}
+ .content{padding-bottom:calc(100px + env(safe-area-inset-bottom))}
+ .shell input,.shell textarea{font-size:16px}
+ .totals strong{white-space:normal;overflow-wrap:anywhere}
+}
+@media(min-width:760px) and (max-width:1049px){
+ .bottomNav{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
+ .bottomNav a{min-height:60px}
+}
+
+/* Owner priorities: recorded money first; five mobile destinations. */
+.financeFirst{min-width:0;margin-bottom:18px}
+.moreNav{position:relative;min-width:0}
+.moreNav summary{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-height:52px;padding:8px 2px;list-style:none;cursor:pointer;color:var(--muted);font-size:11px;border-radius:8px;line-height:1.25}
+.moreNav summary::-webkit-details-marker{display:none}
+.moreNav summary.moreActive,.moreNav[open]>summary{color:var(--blue);background:var(--wash)}
+.moreMenu{position:absolute;right:0;bottom:calc(100% + 12px);width:220px;max-width:calc(100vw - 24px);padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 28px #0003}
+.moreMenu a{flex-direction:row;justify-content:flex-start;gap:12px;min-height:48px;padding:12px;font-size:14px;text-align:left;border-radius:8px}
+.moreMenu a:hover{background:var(--wash)}
+@media(max-width:759px){.moreNav summary{gap:3px;padding:6px 2px}}
+@media(min-width:760px) and (max-width:1049px){.moreNav summary{min-height:60px}}

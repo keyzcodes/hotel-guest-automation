@@ -17,6 +17,8 @@ export function parseReportPosition(raw: string | null): Partial<ReportPosition>
   } catch { return {}; }
 }
 export function workspaceSection(hash: string, saved: string | null, isGM: boolean) {
-  const value = hash.replace(/^#/, '').split('?')[0] || saved || 'overview';
-  return ['overview', 'guests', 'reports'].includes(value) || (value === 'staff' && isGM) ? value : 'overview';
+  const requested = hash.replace(/^#/, '').split('?')[0] || saved || 'overview';
+  // Existing Guests bookmarks open the stays screen in the unified navigation.
+  const value = requested === 'guests' ? 'stays' : requested;
+  return ['overview', 'conversations', 'requests', 'stays', 'rooms', 'reports'].includes(value) || (value === 'staff' && isGM) ? value : 'overview';
 }
