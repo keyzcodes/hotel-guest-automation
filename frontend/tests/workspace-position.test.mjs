@@ -11,7 +11,7 @@ const { workspaceSection, parseReportPosition } = moduleCopy.exports;
 test('explicit URL wins; missing URL resumes the saved workspace', () => {
   assert.equal(workspaceSection('#reports', 'overview', false), 'reports');
   assert.equal(workspaceSection('', 'reports', false), 'reports');
-  assert.equal(workspaceSection('#guests', 'reports', true), 'guests');
+  assert.equal(workspaceSection('#guests', 'reports', true), 'stays');
   assert.equal(workspaceSection('', null, false), 'overview');
 });
 test('stored staff-management position does not grant staff access', () => {
@@ -31,4 +31,13 @@ test('corrupt browser storage and invalid dates cannot become a saved report pos
   for (const value of [null, '', '{bad', '[]', 'true']) assert.equal(Object.keys(parseReportPosition(value)).length, 0);
   const value = parseReportPosition(JSON.stringify({ from: '2026-02-30', to: {}, mode: 'anything', detailId: 'bad', department: '$where' }));
   assert.equal(Object.keys(value).length, 0);
+});
+
+test('all six workspaces restore directly and legacy Guests links stay usable', () => {
+  for (const section of ['overview', 'conversations', 'requests', 'stays', 'rooms', 'reports']) {
+    assert.equal(workspaceSection('#' + section, 'reports', false), section);
+    assert.equal(workspaceSection('', section, true), section);
+  }
+  assert.equal(workspaceSection('', 'guests', true), 'stays');
+  assert.equal(workspaceSection('#requests?scope=Current', 'reports', true), 'requests');
 });

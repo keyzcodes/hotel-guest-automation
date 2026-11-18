@@ -39,7 +39,7 @@ type Booking = {
   stayStatus: string;
   whatsappJid?: string | null;
 };
-type View = "Overview" | "Conversations" | "Requests" | "Stays" | "Rooms";
+export type View = "Overview" | "Conversations" | "Requests" | "Stays" | "Rooms";
 const API = "";
 const departments = [
   "Housekeeping",
@@ -84,7 +84,7 @@ function Icon({ name }: { name: string }) {
     </svg>
   );
 }
-export default function GuestWorkspace({ embedded = false }: { embedded?: boolean }) {
+export default function GuestWorkspace({ embedded = false, activeView, onViewChange, hideNavigation = false }: { embedded?: boolean; activeView?: View; onViewChange?: (view: View) => void; hideNavigation?: boolean }) {
   const { logout, signingOut, identity } = useStaffAccess();
   const hotelName = identity?.hotelName || 'Hotel Demo';
   const refreshFlight = useRef<Promise<void> | null>(null);
@@ -93,7 +93,12 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
   const [staySearch, setStaySearch] = useState("");
   const [conversationTarget, setConversationTarget] = useState("");
   const [revision, setRevision] = useState(0);
-  const [view, setView] = useState<View>("Overview");
+  const [localView, setLocalView] = useState<View>("Overview");
+  const view = activeView ?? localView;
+  const setView = useCallback((next: View) => {
+    setLocalView(next);
+    onViewChange?.(next);
+  }, [onViewChange]);
   const [dark, setDark] = useState(false);
   const [showReservations, setShowReservations] = useState(false);
   const [inventory, setInventory] = useState<{ enabled: boolean; rooms: RoomRecord[]; stayPolicy?: {checkInTime: string; checkOutTime: string; checkInLabel: string; checkOutLabel: string} } | null>(null);
@@ -294,7 +299,7 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
       try {
         setShowForm(sessionStorage.getItem("hotel-checkin-open") === "true");
         const savedView = sessionStorage.getItem("hotel-workspace-view");
-        if (
+        if (!embedded &&
           ["Overview", "Conversations", "Requests", "Stays", "Rooms"].includes(
             savedView || "",
           )
@@ -308,7 +313,7 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [embedded, setView]);
   useEffect(() => {
     if (!draftReady) return;
 
@@ -589,7 +594,7 @@ export default function GuestWorkspace({ embedded = false }: { embedded?: boolea
   ));
   return (
     <div className={`${styles.app} ${embedded ? styles.embedded : ''}`}>
-      {embedded && <nav className={styles.sectionNav} aria-label="Guest service sections">{nav}</nav>}
+      {embedded && !hideNavigation && <nav className={styles.sectionNav} aria-label="Guest service sections">{nav}</nav>}
       <aside className={styles.sidebar}>
         <div className={styles.brand}>
           <div className={styles.logo}>{hotelName[0]}</div>
